@@ -468,6 +468,21 @@ class NewViewer(BaseViewer):
             goal_pos.y = 0.163378  # Adjust height
         frames = self.shortest_path(sim, goal_pos, target_name)
 
+        if len(frames) == 0: 
+            # get the closest objects to the target object
+            target_pos = goal_pos
+            closest_positions = viewer.get_closest_object_position(target_pos, target_name=target_name, room_name=room_name, max_count=5)
+            
+            # Try each nearby object until we find a feasible path
+            for i, nearby_pos in enumerate(closest_positions):
+                print(f"Trying nearby object {i+1}/{len(closest_positions)} at position {nearby_pos}")
+                if nearby_pos.y < 2.0:
+                    nearby_pos.y = 0.163378  # Adjust height
+                frames = self.shortest_path(sim, nearby_pos, target_name)
+                if len(frames) > 0:
+                    print(f"Found feasible path to nearby object {i+1}")
+                    break
+
         if len(frames) == 0:
             goal_pos = viewer.get_object_position(object_name=None, room_name=room_name)
             print(f"Retrying navigation to room center at position {goal_pos}")
@@ -488,6 +503,36 @@ class NewViewer(BaseViewer):
         print("\n--- GENERATED DESCRIPTION ---\n")
         print(instructions)
         output_q.put(instructions)
+
+    def get_closest_object_position(self, target_pos, target_name="", room_name="", max_count=5) -> List[mn.Vector3]:
+        """
+        Returns a list of positions of the closest objects to target_pos.
+        The list is ordered from closest to farthest, up to max_count objects.
+        """
+        candidates = []
+        
+        for obj in self.objects.values():
+            # Skip the target object itself
+            if target_name and obj.get("label").lower() == target_name.lower():
+                continue
+            # Filter by room if specified
+            if room_name and obj.get("room") != room_name:
+                continue
+            
+            obj_pos = mn.Vector3(obj.get("centroid_world"))
+            diff = obj_pos - target_pos
+            distance = math.sqrt(diff.x * diff.x + diff.y * diff.y + diff.z * diff.z)
+            
+            candidates.append((distance, obj_pos))
+        
+        # Sort by distance (ascending) and take the first max_count
+        candidates.sort(key=lambda x: x[0])
+        closest_positions = [pos for _, pos in candidates[:max_count]]
+        
+        if closest_positions:
+            print(f"Found {len(closest_positions)} nearby objects. Closest at distance {candidates[0][0]:.2f}m")
+        
+        return closest_positions
         
 
     def get_floor_from_room(self, room_name: str) -> int:
@@ -585,12 +630,12 @@ class NewViewer(BaseViewer):
                             # If Y component of cross product is positive, turn is to the left; if negative, to the right
                             angle_deg = math.degrees(angle)
                             print(f"[PAPERINO] Angle to first path segment: {angle_deg:.2f} degrees")
-                            if 45.0 < angle_deg < 110.0:
+                            if 50.0 < angle_deg < 110.0: # TODO tune appropriately
                                 if cross_product[1] > 0:
                                     turn_direction = "left"
                                 else:
                                     turn_direction = "right"
-                            elif angle_deg <= 45.0:
+                            elif angle_deg <= 50.0:
                                 turn_direction = "forward"
                             else:
                                 turn_direction = "behind"
@@ -1816,7 +1861,7 @@ def user_input_logic_loop(viewer: NewViewer, input_q: queue.Queue, output_q: que
             if not user_input:
                 continue
 
-            llm_enabled = True
+            llm_enabled = False
             # output_q.put("Processing your request...")
             if not llm_enabled:
                 try:

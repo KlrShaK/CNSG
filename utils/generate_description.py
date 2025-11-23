@@ -393,7 +393,7 @@ def extract_relations(
     return filtered, clusters
 
 
-def summarise_frames(frames: Sequence[Dict[str, Any]], num_clusters_per_frame = 2, target_name: str = "") -> List[FrameSummary]:
+def summarise_frames(frames: Sequence[Dict[str, Any]], num_clusters_per_frame = 2, target_name: str = "", target_room: str = "") -> List[FrameSummary]:
     summaries: List[FrameSummary] = []
     clusters_to_draw = {}
 
@@ -416,6 +416,8 @@ def summarise_frames(frames: Sequence[Dict[str, Any]], num_clusters_per_frame = 
             
         # clusters_to_draw = {"cluster_str_id": ["obj_str_id1", "obj_str_id2", ...], ...}
         current_room = frame.get("current_room", {})
+        if current_room is None:
+            current_room = {}
 
         if not target_found:
             summaries.append(
@@ -432,6 +434,7 @@ def summarise_frames(frames: Sequence[Dict[str, Any]], num_clusters_per_frame = 
         for cluster in selected_clusters:
             cluster_str_id = cluster.get("cluster_str_id", "")
             obj_str_ids = cluster.get("obj_str_ids", [])
+            cluster_room = cluster.get("room", "")
 
             # print("Selected Cluster", cluster_str_id, "with obj IDs:", obj_str_ids)
             if cluster_str_id in clusters_to_draw:
@@ -439,7 +442,7 @@ def summarise_frames(frames: Sequence[Dict[str, Any]], num_clusters_per_frame = 
             else:
                 clusters_to_draw[cluster_str_id] = obj_str_ids
             
-            if target_name and target_name in cluster_str_id.lower():
+            if target_name and target_name in cluster_str_id.lower() and cluster_room.lower() == target_room.lower():
                 target_found = True #! NOTE added, check if this works better than before
         
 
@@ -723,7 +726,7 @@ def generate_path_description(
     """
     frames = frames[:max_frames] if max_frames else frames
     num_clusters_per_frame = 2
-    summaries, clusters_to_draw, rooms_visited = summarise_frames(frames, num_clusters_per_frame=num_clusters_per_frame, target_name=target_name)
+    summaries, clusters_to_draw, rooms_visited = summarise_frames(frames, num_clusters_per_frame=num_clusters_per_frame, target_name=target_name, target_room=room_name)
     current_room_names = [room.get("name") for room in rooms_visited if isinstance(room, dict)]
     if room_name != "" and room_name not in current_room_names:
         rooms_visited.append({"name": room_name, "floor_number": floor_number})
