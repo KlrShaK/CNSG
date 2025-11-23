@@ -1861,7 +1861,7 @@ def user_input_logic_loop(viewer: NewViewer, input_q: queue.Queue, output_q: que
             if not user_input:
                 continue
 
-            llm_enabled = False
+            llm_enabled = True
             # output_q.put("Processing your request...")
             if not llm_enabled:
                 try:

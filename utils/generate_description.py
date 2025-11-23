@@ -486,8 +486,7 @@ def build_prompt(summaries: Sequence[FrameSummary], user_input: str, rooms_visit
             continue
         visited_room_strings.append(f"{room.get('name')} (floor: {room.get('floor_number')})")
     
-    return textwrap.dedent(
-        f"""
+    user_prompt = f"""
         User question: {user_input}
 
         Observations:
@@ -496,11 +495,10 @@ def build_prompt(summaries: Sequence[FrameSummary], user_input: str, rooms_visit
         Rooms visited in order: \n{', '.join(visited_room_strings)}
         The user is in {rooms_visited[0].get("name")} (floor: {rooms_visited[0].get("floor_number")}) and the target is in {rooms_visited[-1].get("name")} (floor: {rooms_visited[-1].get("floor_number")}).
         """
-    ).strip()
+    return user_prompt
 
 def few_shot_examples() -> str:
-    return textwrap.dedent(
-        """
+    few_shots = """
         ### Example 1
         User question: Where is the wall clock in the kitchen?
         Observations:
@@ -578,7 +576,7 @@ def few_shot_examples() -> str:
 
         ### End of examples.
         """
-    ).strip()
+    return few_shots
 
 def generate_description(user_prompt: str, model = None, tokenizer = None) -> str:
 
@@ -611,7 +609,8 @@ def generate_description(user_prompt: str, model = None, tokenizer = None) -> st
 
             You will then receive a user question and the list of observations from the path, as well as the rooms visited in order. Imagine you are moving from the starting room to the target location, and provide clear path instructions.
         """
-        # system_prompt += few_shot_examples() #! NOTE added few shot examples only for OpenAI API (out of memory issues with local model)
+        #! TODO modify few shots with new observations (directions, floors, rooms)
+        system_prompt += few_shot_examples() #! NOTE added few shot examples only for OpenAI API (out of memory issues with local model)
     
     else:
         system_prompt = """
@@ -655,6 +654,12 @@ def generate_description(user_prompt: str, model = None, tokenizer = None) -> st
             "content": user_prompt
         },
     ]
+    with open("data_collection.txt", "a") as f:
+        f.write("\n=== New Episode ===\n")
+        f.write("\nSystem Prompt:\n")
+        f.write(system_prompt + "\n")
+        f.write("\nUser Prompt:\n")
+        f.write(user_prompt + "\n")
     
     if model == None or tokenizer == None:
 
@@ -752,6 +757,9 @@ def generate_path_description(
             if cluster_str_id in description:
                 clusters_to_draw_final[cluster_str_id] = clusters_to_draw[cluster_str_id]
     print("\nDescription before cleaning:", description)
+    with open("data_collection.txt", "a") as f:
+        f.write("\nGenerated Description:\n")
+        f.write(description + "\n\n")
     description = clean_text_from_ids(description)
 
     return description, clusters_to_draw_final
