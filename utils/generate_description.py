@@ -17,6 +17,8 @@ import torch
 
 load_dotenv()
 
+COLLECT_DATA = False
+
 # Structural labels do not help with navigation cues.
 IGNORED_LABELS = {
     "ceiling",
@@ -654,12 +656,13 @@ def generate_description(user_prompt: str, model = None, tokenizer = None) -> st
             "content": user_prompt
         },
     ]
-    with open("data_collection.txt", "a") as f:
-        f.write("\n=== New Episode ===\n")
-        f.write("\nSystem Prompt:\n")
-        f.write(system_prompt + "\n")
-        f.write("\nUser Prompt:\n")
-        f.write(user_prompt + "\n")
+    if COLLECT_DATA:
+        with open("data_collection.txt", "a") as f:
+            f.write("\n=== New Episode ===\n")
+            f.write("\nSystem Prompt:\n")
+            f.write(system_prompt + "\n")
+            f.write("\nUser Prompt:\n")
+            f.write(user_prompt + "\n")
     
     if model == None or tokenizer == None:
 
@@ -757,9 +760,12 @@ def generate_path_description(
             if cluster_str_id in description:
                 clusters_to_draw_final[cluster_str_id] = clusters_to_draw[cluster_str_id]
     print("\nDescription before cleaning:", description)
-    with open("data_collection.txt", "a") as f:
-        f.write("\nGenerated Description:\n")
-        f.write(description + "\n\n")
+    
+    if COLLECT_DATA:
+        with open("data_collection.txt", "a") as f:
+            f.write("\nGenerated Description:\n")
+            f.write(description + "\n\n")
+
     description = clean_text_from_ids(description)
 
     return description, clusters_to_draw_final
