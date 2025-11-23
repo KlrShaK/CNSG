@@ -149,6 +149,8 @@ class FrameSummary:
     name: str
     clusters: Sequence[str]
     relations: Sequence[str]
+    current_room_name: str | None = None
+    current_floor: str | None = None
     turn_direction: str | None = None
 
     def to_prompt_line(self, num_clusters_per_frame = 2) -> str:
@@ -172,8 +174,10 @@ class FrameSummary:
         elif self.turn_direction == "behind" and frame_number == 0:
             direction_part = f"{connector}, turn around.\n"
 
-
-        description = f"{direction_part} In {self.name}, you see {object_part}."
+        if "unknown" in (self.current_room_name or "").lower() or "unknown" in (str(self.current_floor) or "").lower():
+            description = f"{direction_part} In {self.name}, you see {object_part}."
+        else:
+            description = f"{direction_part} In {self.name} you are in {self.current_room_name} on floor {self.current_floor}. You see {object_part}."
     
         return description
     
@@ -411,6 +415,7 @@ def summarise_frames(frames: Sequence[Dict[str, Any]], num_clusters_per_frame = 
         
             
         # clusters_to_draw = {"cluster_str_id": ["obj_str_id1", "obj_str_id2", ...], ...}
+        current_room = frame.get("current_room", {})
 
         if not target_found:
             summaries.append(
@@ -418,6 +423,8 @@ def summarise_frames(frames: Sequence[Dict[str, Any]], num_clusters_per_frame = 
                     name=name,
                     clusters=phrases,
                     turn_direction=turn_direction,
+                    current_room_name=current_room.get("name", "unknown_room"),
+                    current_floor=current_room.get("floor_number", "unknown_floor"),
                     relations=[],
                 )
             ) 
@@ -601,7 +608,7 @@ def generate_description(user_prompt: str, model = None, tokenizer = None) -> st
 
             You will then receive a user question and the list of observations from the path, as well as the rooms visited in order. Imagine you are moving from the starting room to the target location, and provide clear path instructions.
         """
-        system_prompt += few_shot_examples() #! NOTE added few shot examples only for OpenAI API (out of memory issues with local model)
+        # system_prompt += few_shot_examples() #! NOTE added few shot examples only for OpenAI API (out of memory issues with local model)
     
     else:
         system_prompt = """
