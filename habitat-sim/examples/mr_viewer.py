@@ -455,8 +455,65 @@ class NewViewer(BaseViewer):
         self.clusters_to_draw = clusters_to_draw
         # print(f"Updated clusters_to_draw: {self.clusters_to_draw}")  
 
+    def start_local_llm_navigation(self, user_input, model, tokenizer, output_q):
+        try:
+            response = classify_user_intent_local(user_input, model, tokenizer)
+            print("Response from Local LLM: ", response)
+            if "start" not in response.lower():
+                # remove everything within < >
+                response = re.sub(r'<.*?>', '', response)
+                # friendly response
+                output_q.put(response)
+                return
+        except Exception as e:
+            print("Error classifying user intent with local LLM:", e)
+            return
+        # else, perform navigation
 
-    def start_navigation(self, sim, target_name: str, room_name: str = "", user_input=None, output_q=None):
+        candidate_goals = viewer.get_rooms_objects(user_input)
+
+        checked_candidate_goals = []
+        for room_name, target_name in candidate_goals:
+            # perfrom sanity check
+            if not viewer.check_object_in_room(target_name, room_name):
+                print(f"Sanity check failed: '{target_name}' not in '{room_name}'")
+                continue
+            checked_candidate_goals.append((room_name, target_name))
+
+        if not checked_candidate_goals:
+            output_q.put("Could not find the specified object or room. Please provide more details.")
+            return
+        
+        self.start_navigation(sim=self.sim, candidate_goals=checked_candidate_goals, user_input=user_input, output_q=output_q)
+
+    def start_navigation(self, sim, candidate_goals = [], user_input=None, output_q=None):
+        if len(candidate_goals) == 0:
+            return
+        if len(candidate_goals) == 1:
+            print(f"Single candidate goal: {candidate_goals[0]}")
+            room_name, target_name = candidate_goals[0]
+        else:
+            print(f"Multiple candidate goals: {candidate_goals}")
+            # if multiple candidate goals, pick the closest one to the agent
+            agent_state = sim.get_agent(self.agent_id).get_state()
+            agent_pos = agent_state.position
+            min_distance = float('inf')
+            for room_name, target_name in candidate_goals:
+                goal_pos = self.get_object_position(object_name=target_name, room_name=room_name)
+                if goal_pos is None:
+                    continue
+                diff = goal_pos - agent_pos
+                distance = math.sqrt(diff.x * diff.x + diff.y * diff.y + diff.z * diff.z)
+                if distance < min_distance:
+                    min_distance = distance
+                    closest_goal = (room_name, target_name)
+                    print(f"New closest goal: {closest_goal} at distance {min_distance:.2f}m")
+
+            if closest_goal is None:
+                print("No valid goal positions found among candidate goals.")
+                return
+            room_name, target_name = closest_goal
+
         goal_pos = viewer.get_object_position(object_name=target_name, room_name=room_name)
         print(f"Navigating to: '{room_name}/{target_name}' at position {goal_pos}")
 
@@ -1810,10 +1867,103 @@ class NewViewer(BaseViewer):
             {"role": "user", "content": user_input + "\n" + str(self.room_objects_occurences)},
         ]
 
+        print("[PIPPO]: "+str(self.room_objects_occurences))
+
         response = client.chat.completions.create(model="gpt-4o", messages=messages)
         print("Response from GPT:")
         print(response.choices[0].message.content)
         return response.choices[0].message.content
+    
+    def get_rooms_objects(self, user_input):
+        # This function retrieves the rooms and objects from the JSON file and prints them
+        print("Rooms and their objects:")
+        room_norm_labels = ["living room", "kitchen", "bathroom", "bedroom", "dining room", "hallway", "office", "laundry room", "garage", "balcony", "garden", "entryway", "storage room", "closet", "pantry", "attic", "basement"]
+
+        def get_norm_room_label(room_label: str) -> str:
+            room_label = room_label.lower()
+            for norm_label in room_norm_labels:
+                if norm_label in room_label:
+                    return norm_label
+            return room_label
+        
+        SYNONYMS = {
+            "wall clock": ["wall clock", "clock", "analog clock", "digital clock"],
+            "tv": ["led tv", "tv"],
+            "plush toy": ["plush toy", "toy", "plushie", "stuffed animal", "plushtoy"],
+            "plate": ["plate", "decorative plate"],
+            "soap": ["hand soap", "soap bottle", "bottle of soap"],
+            "lamp": ["lamp", "table lamp", "ceiling lamp", "wall lamp"],
+            "couch": ["sofa", "couch", "loveseat"],
+            "carpet": ["rug", "carpet", "area rug", "doormat"],
+            "picture": ["painting", "picture", "photo frame", "wall art", "photograph", "photo"],
+            "oven and stove": ["oven and stove", "stove", "oven", "cooking range"],
+            "refrigerator": ["fridge", "refrigerator", "icebox"],
+            "microwave": ["microwave", "microwave oven"],
+            "bookshelf": ["bookcase", "bookshelf", "shelving unit"],
+            "desk": ["desk", "writing table", "workstation"],
+        }
+
+       
+        candidate_rooms = []
+        for room in self.room_objects_occurences.keys():
+            if room in user_input.lower():
+                candidate_rooms.append(room)
+                print("Direct match for room:", room)
+                break
+        if candidate_rooms:
+            best_candidate_room = candidate_rooms[0]
+        else:
+            best_candidate_room = None
+            for room in self.room_objects_occurences.keys():
+                norm_room_name = get_norm_room_label(room) # altirmenti prova a normalizzare e poi cerca tutte le stanze con quella normalizzazione (ritornerà poi una lista)
+                print("Normalized room name:", norm_room_name)
+                if norm_room_name in user_input.lower():
+                    candidate_rooms.append(room)
+        
+        candidate_rooms = list(set(candidate_rooms))
+        print("Candidate rooms after normalization:", candidate_rooms)
+
+        # TODO se l'ogetto appare in più stanze ma l'utente ha specificato una stanza precisa --> da gestire
+
+        candidate_objects = []
+        for room, objs in self.room_objects_occurences.items():
+            for obj in objs.keys():
+                obj_norm_labels = [obj.lower()]
+                if obj.lower() in SYNONYMS:
+                    obj_norm_labels.extend(SYNONYMS[obj.lower()])
+
+                for obj_norm_label in obj_norm_labels:
+                    # Use word boundaries to avoid matching "bed" in "bedroom" or "bath" in "bathroom"
+                    pattern = r'\b' + re.escape(obj_norm_label) + r'\b'
+                    if re.search(pattern, user_input.lower()):
+                        candidate_objects.append(obj)
+                        candidate_rooms.append(room)  # also add the room where the object was found
+        
+        candidate_rooms = list(set(candidate_rooms))
+        print("Candidate rooms:", candidate_rooms)
+        candidate_objects = list(set(candidate_objects))
+        print("Candidate objects:", candidate_objects)
+
+        returned_goals = []
+        
+        for room in candidate_rooms:
+            if len(candidate_objects) == 0:
+                returned_goals.append((room, None))  # only room mentioned
+            else:
+                objs_in_room = self.room_objects_occurences[room]
+                for candidate_object in candidate_objects:
+                    if candidate_object in objs_in_room:
+                        if best_candidate_room is not None and room != best_candidate_room:
+                            continue
+                        # if objs_in_room[candidate_object] == 1: # object occurs once in room
+                        returned_goals.append((room, candidate_object))
+                        # else:
+                        #     returned_goals.append((room, None))  # object repeated in room
+        
+        return returned_goals
+
+                
+
 
 
 def get_goal_from_response(response: str) -> object:
@@ -1853,7 +2003,48 @@ def get_goal_from_response(response: str) -> object:
     else:
         raise ValueError(f"Unexpected rule number: {rule_number}")
 
-def user_input_logic_loop(viewer: NewViewer, input_q: queue.Queue, output_q: queue.Queue):
+def classify_user_intent_local(user_input: str, model, tokenizer) -> str:
+    """
+    Uses a local LLM to classify if the user input is a navigation query or conversational.
+    Returns "navigation" if it's a navigation request, otherwise returns a friendly response.
+    """
+    system_prompt = """
+    You are an assistant for a home navigation system.
+    Your task is to interpret natural language queries from the user who might:
+    - ask to go to a room, or
+    - ask where to find an object.
+    - engage in friendly conversation.
+    If the user is asking for a room or an object, respond with "start".
+    If the user is not asking for navigation, respond in a friendly manner.
+    """
+    messages = [
+        {"role": "system", "content": system_prompt},
+        {"role": "user", "content": user_input},
+    ]
+
+    # --- Create inputs ---
+    input_ids = tokenizer.apply_chat_template(
+        messages,
+        add_generation_prompt=True,
+        return_tensors="pt",
+    ).to(model.device)
+
+    attention_mask = torch.ones_like(input_ids)
+    
+    # --- Generate ---
+    with torch.no_grad():
+        outputs = model.generate(
+            input_ids=input_ids,
+            attention_mask=attention_mask,
+            max_new_tokens=60
+        )
+
+    generated = outputs[0][input_ids.shape[-1]:]
+    response = tokenizer.decode(generated, skip_special_tokens=True).strip()
+    return response
+
+
+def user_input_logic_loop(viewer: NewViewer, input_q: queue.Queue, output_q: queue.Queue, model=None, tokenizer=None):
     while True:
         try:
             user_input = input_q.get()
@@ -1861,15 +2052,22 @@ def user_input_logic_loop(viewer: NewViewer, input_q: queue.Queue, output_q: que
             if not user_input:
                 continue
 
-            llm_enabled = True
+            local_llm_input = model is not None and tokenizer is not None  
             # output_q.put("Processing your request...")
-            if not llm_enabled:
-                try:
-                    target_name, room_name = user_input.split("/")[0].strip(), user_input.split("/")[1].strip()
-                    output_q.put(f"Navigating to {room_name}/{target_name}...")
-                except Exception as e:
-                    print("Error parsing input without LLM. Please use 'object/room' format.")
-                    continue
+            if local_llm_input:
+                print("Using Local LLM for intent classification.")
+                # use the local model to parse the user input 
+                # if the user input is a navigation query, the output of the llm should be "navigation", otherwise the llm should return a friendly response
+                viewer.action_queue.put((viewer.start_local_llm_navigation, (user_input, model, tokenizer, output_q), {}))
+                
+
+
+                # try:
+                #     target_name, room_name = user_input.split("/")[0].strip(), user_input.split("/")[1].strip()
+                #     output_q.put(f"Navigating to {room_name}/{target_name}...")
+                # except Exception as e:
+                #     print("Error parsing input without LLM. Please use 'object/room' format.")
+                #     continue
             else: 
                 try:           
                     response = viewer.get_response_LLM(user_input)  # * API Call to ChatGPT
@@ -1908,19 +2106,19 @@ def user_input_logic_loop(viewer: NewViewer, input_q: queue.Queue, output_q: que
                 else:
                     print(f"Unhandled goal type: {res_type}")
 
-            # * === SANITY CHECK ===
-            if not viewer.check_object_in_room(target_name, room_name):
-                print(f"Sanity check failed: '{target_name}' not in '{room_name}'")
-                continue
-            else:
-                print(f"Sanity check passed: '{target_name}' in '{room_name}'")
+                # * === SANITY CHECK ===
+                if not viewer.check_object_in_room(target_name, room_name):
+                    print(f"Sanity check failed: '{target_name}' not in '{room_name}'")
+                    continue
+                else:
+                    print(f"Sanity check passed: '{target_name}' in '{room_name}'")
 
-            # * Query scene (and retrieve a point in the 3D space)
+                # * Query scene (and retrieve a point in the 3D space)
 
 
-            
-            viewer.action_queue.put((viewer.start_navigation, (viewer.sim, target_name, room_name, user_input, output_q), {}))
-            # output_q.put(f"Generating navigation instructions...")
+                candidate_goals = [(room_name, target_name)]
+                viewer.action_queue.put((viewer.start_navigation, (viewer.sim, candidate_goals, user_input, output_q), {}))
+                # output_q.put(f"Generating navigation instructions...")
 
 
 
@@ -2016,9 +2214,9 @@ if __name__ == "__main__":
     )
     parser.add_argument(
         "--backend",
-        default="openai",
+        default="local", # openai
         type=str,
-        help="LLM backend to use: openai (default), local.",
+        help="LLM backend to use: openai / local (default).",
     )
 
     args = parser.parse_args()
@@ -2064,12 +2262,6 @@ if __name__ == "__main__":
 
     viewer = NewViewer(sim_settings, q_app=q_app)
 
-    logic_thread = threading.Thread(
-        target=user_input_logic_loop,
-        args=(viewer, input_from_gui_q, output_to_gui_q),
-        daemon=True,
-    )
-    logic_thread.start()
 
     # * Depending on the backend flag, load the local model
     if args.backend.lower() == "local":
@@ -2079,6 +2271,14 @@ if __name__ == "__main__":
         except Exception as e:
             print(f"[mr_viewer.py main] Error loading local model: {e}")
             sys.exit(1)
+
+
+    logic_thread = threading.Thread(
+        target=user_input_logic_loop,
+        args=(viewer, input_from_gui_q, output_to_gui_q, model, tokenizer),
+        daemon=True,
+    )
+    logic_thread.start()
 
     viewer.exec()
 
