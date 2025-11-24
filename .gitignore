@@ -6,3 +6,8 @@ output*/
 
 **/__pycache__
 *.pyc
+
+# Finetuning
+finetuning/logs/
+finetuning/phi3-*
+finetuning/raw_examples.txt
