@@ -502,83 +502,140 @@ def build_prompt(summaries: Sequence[FrameSummary], user_input: str, rooms_visit
 def few_shot_examples() -> str:
     few_shots = """
         ### Example 1
-        User question: Where is the wall clock in the kitchen?
+        User question: Where is the wall clock?
         Observations:
-        In frame-000000, you see door_0 [(relative position: lower-right), (distance: close), (room: upper bedroom), (floor: 1)], couch_102 [(relative position: lower-left), (distance: mid-distance), (room: office), (floor: 1)].
-        In frame-000001, you see door_0 [(relative position: center-right), (distance: close), (room: upper bedroom), (floor: 1)], stairs_142 [(relative position: lower-center), (distance: close), (room: living room), (floor: 0)].
-        In frame-000002, you see stairs_142 [(relative position: lower-center), (distance: close), (room: living room), (floor: 0)], door_2 [(relative position: lower-left), (distance: mid-distance), (room: living room), (floor: 0)].
-        In frame-000003, you see door_2 [(relative position: center-left), (distance: close), (room: living room), (floor: 0)], armchair_59 [(relative position: lower-left), (distance: mid-distance), (room: living room), (floor: 0)].
-        In frame-000004, you see armchair_59 [(relative position: lower-right), (distance: mid-distance), (room: living room), (floor: 0)], couch_103 [(relative position: lower-left), (distance: close), (room: living room), (floor: 0)].
-        In frame-000005, you see wall clock_175 [(relative position: upper-left), (distance: slightly far), (room: kitchen), (floor: 0)], couch_103 [(relative position: lower-left), (distance: close), (room: living room), (floor: 0)].
-        Rooms visited in order: upper bedroom, office, living room, kitchen
+        Initially, turn right.
+        In frame-000000 you are in living room on floor 0. You see wall clock_205 [(relative position: center), (room: kitchen)], couch_126 [(relative position: lower-left), (room: living room)].
+        Rooms visited in order:
+        living room (floor: 0), kitchen (floor: 0)
+        The user is in living room (floor: 0) and the target is in kitchen (floor: 0).
         Response:
-        Go down the stairs_142 in front of you, and reach the living room. Here you'll find an armchair_59 to your left and a couch_103 on your right. Continue straight ahead into the kitchen where the wall clock_175 is visible on the upper-left wall.
+        Start by turning right from the living room. Walk straight ahead to the kitchen and find the wall clock_205 on the wall to the left.
 
         ### Example 2
-        User question: How do I get to the fireplace?
+        User question: where is the refrigerator?
         Observations:
-        In frame-000000, you see door_7 [(relative position: lower-left), (distance: close), (room: entryway), (floor: 0)], picture_114 [(relative position: center-left), (distance: close), (room: entryway), (floor: 0)].
-        In frame-000001, you see picture_114 [(relative position: center-left), (distance: very close), (room: entryway), (floor: 0)], flag_176 [(relative position: lower-right), (distance: close), (room: kitchen), (floor: 0)].
-        In frame-000002, you see chair_126 [(relative position: lower-left), (distance: close), (room: kitchen), (floor: 0)], door_6 [(relative position: center-right), (distance: close), (room: kitchen), (floor: 0)].
-        In frame-000003, you see fireplace_153 [(relative position: lower-left), (distance: slightly far), (room: living room), (floor: 0)], armchair_60 [(relative position: lower-left), (distance: mid-distance), (room: living room), (floor: 0)].
-        Rooms visited in order: entryway, kitchen, living room
+        Initially, continue forward.
+        In frame-000000 you are in living room on floor 0. You see refrigerator_207 [(relative position: center-left), (room: kitchen)], armchair_74 [(relative position: lower-right), (room: living room)].
+        Rooms visited in order:
+        living room (floor: 0), kitchen (floor: 0)
+        The user is in living room (floor: 0) and the target is in kitchen (floor: 0).
         Response:
-        From the entryway, reach the corridor where you see a flag_176 to enter the kitchen. Continue straight ahead into the living room, where the fireplace_153 is located to the lower-left.
+        Start by heading straight ahead from the living room. Once you reach the kitchen, you'll find the refrigerator_207 in front of you.
 
         ### Example 3
-        User question: I want to go to the fireplace.
+        User question: where is the dining room?
         Observations:
-        Observations:
-        In frame-000000, you see fireplace_153 [(relative position: lower-left), (distance: slightly far), (room: living room), (floor: 0)], armchair_59 [(relative position: lower-right), (distance: mid-distance), (room: living room), (floor: 0)].
-        Rooms visited in order: living room
+        Initially, continue forward.
+        In frame-000000 you are in living room on floor 0. You see oven and stove_222 [(relative position: lower-right), (room: kitchen)], kitchen cabinet_208 [(relative position: center-right), (room: kitchen)].
+        In frame-000001 you are in kitchen on floor 0. You see kitchen cabinet_208 [(relative position: center-right), (room: kitchen)], refrigerator_207 [(relative position: lower-right), (room: kitchen)].
+        In frame-000002 you are in kitchen on floor 0. You see chair_153 [(relative position: lower-right), (room: dining room)], cabinet_34 [(relative position: lower-left), (room: dining room)].
+        Rooms visited in order:
+        living room (floor: 0), kitchen (floor: 0), dining room (floor: 0)
+        The user is in living room (floor: 0) and the target is in dining room (floor: 0).
         Response:
-        You can already see the fireplace_153, it's located right in front of you in the living room, just below the led tv_151.
+        Start by moving forward from the living room. Continue straight into the kitchen, then go in the corridor to the left. You’ll find the dining room right in front of you.
 
         ### Example 4
-        User question: I am hungry, can you guide me to the refrigerator?
+        User question: where is the doormat?
         Observations:
-        In frame-000000, you see refrigerator_177 [(relative position: lower-left), (distance: mid-distance), (room: kitchen), (floor: 0)], kitchen cabinet_178 [(relative position: center-right), (distance: close), (room: kitchen), (floor: 0)].
-        Rooms visited in order: kitchen
+        Initially, continue forward.
+        In frame-000000 you are in entryway on floor 0. You see doormat_236 [(relative position: lower-center), (room: entryway)], door_13 [(relative position: lower-right), (room: entryway)].
+        Rooms visited in order:
+        entryway (floor: 0)
+        The user is in entryway (floor: 0) and the target is in entryway (floor: 0).
         Response:
-        The refrigerator_177 is located in front of you to your left.
+        Start by going straight ahead. The doormat_236 is by the door_13.
 
         ### Example 5
-        User question: I want to go to the kitchen sink.
+        User question: where is the bicycle?
         Observations:
-        In frame-000000, you see sink_184 [(relative position: lower-right), (distance: far), (room: kitchen), (floor: 0)], fireplace_153 [(relative position: lower-right), (distance: mid-distance), (room: living room), (floor: 0)].
-        Rooms visited in order: living room, kitchen
+        Initially, turn around.
+        In frame-000000 you are in kitchen on floor 0. You see couch_126 [(relative position: lower-right), (room: living room)], armchair_73 [(relative position: lower-left), (room: living room)].
+        In frame-000001 you are in living room on floor 0. You see door_8 [(relative position: lower-left), (room: living room)], couch_126 [(relative position: lower-right), (room: living room)].
+        In frame-000002 you are in living room on floor 0. You see stairs_170 [(relative position: lower-center), (room: living room)], picture_136 [(relative position: center-left), (room: living room)].
+        In frame-000003 you are in living room on floor 0. You see bicycle_119 [(relative position: lower-center), (room: office)], stairs_170 [(relative position: lower-center), (room: living room)].
+        Rooms visited in order:
+        kitchen (floor: 0), living room (floor: 0), office (floor: 1)
+        The user is in kitchen (floor: 0) and the target is in office (floor: 1).
         Response:
-        From the living room, head towards the kitchen, and you will find the sink_184 located to your lower-right.
+        Start by turning around, and walk straight ahead into the living room. You will find stairs_170 on your right. Go upstairs to reach the office. Here, you will find the bicycle_119 in front of you.
 
         ### Example 6
-        User question: How do I reach the tv in the upper bedroom?
+        User question: where is the upper bathroom?
         Observations:
-        In frame-000000, you see door_16 [(relative position: lower-center), (distance: close), (room: lower bedroom), (floor: 0)], door_14 [(relative position: lower-center), (distance: mid-distance), (room: entryway), (floor: 0)].
-        In frame-000001, you see door_14 [(relative position: lower-right), (distance: close), (room: entryway), (floor: 0)], door_15 [(relative position: center-left), (distance: close), (room: dining room), (floor: 0)].
-        In frame-000002, you see chair_152 [(relative position: lower-left), (distance: mid-distance), (room: kitchen), (floor: 0)], door_12 [(relative position: center-right), (distance: close), (room: kitchen), (floor: 0)].
-        In frame-000003, you see armchair_74 [(relative position: lower-left), (distance: mid-distance), (room: living room), (floor: 0)], couch_126 [(relative position: lower-right), (distance: mid-distance), (room: living room), (floor: 0)].
-        In frame-000004, you see armchair_73 [(relative position: lower-left), (distance: mid-distance), (room: living room), (floor: 0)], door_8 [(relative position: lower-left), (distance: mid-distance), (room: living room), (floor: 0)].
-        In frame-000005, you see door_8 [(relative position: lower-left), (distance: close), (room: living room), (floor: 0)], stairs_170 [(relative position: lower-right), (distance: close), (room: living room), (floor: 0)].
-        In frame-000006, you see picture_136 [(relative position: upper-right), (distance: close), (room: living room), (floor: 0)], picture_137 [(relative position: center-left), (distance: close), (room: living room), (floor: 0)].
-        In frame-000007, you see stairs_170 [(relative position: lower-center), (distance: mid-distance), (room: living room), (floor: 0)], couch_126 [(relative position: lower-right), (distance: mid-distance), (room: living room), (floor: 0)].
-        In frame-000008, you see stairs_170 [(relative position: center), (distance: very close), (room: living room), (floor: 0)], door_7 [(relative position: upper-left), (distance: slightly far), (room: office), (floor: 1)].
-        In frame-000009, you see door_3 [(relative position: upper-left), (distance: mid-distance), (room: upper bathroom), (floor: 1)], bicycle_119 [(relative position: center-right), (distance: close), (room: office), (floor: 1)].
-        In frame-000010, you see tv_30 [(relative position: lower-right), (distance: close), (room: upper bedroom), (floor: 1)], door_1 [(relative position: center-right), (distance: very close), (room: upper bedroom), (floor: 1)].
-        Rooms visited in order: lower bedroom, entryway, kitchen, living room, office, upper bedroom
+        Initially, continue forward.
+        In frame-000000 you are in office on floor 1. You see door_6 [(relative position: lower-left), (room: office)], door_7 [(relative position: upper-right), (room: office)].
+        In frame-000001 you are in office on floor 1. You see door_3 [(relative position: center), (room: upper bathroom)], door_2 [(relative position: lower-right), (room: upper bedroom)].
+        In frame-000002 you are in office on floor 1. You see cabinet_33 [(relative position: lower-right), (room: upper bathroom)], door_3 [(relative position: lower-center), (room: upper bathroom)].
+        Rooms visited in order:
+        office (floor: 1), upper bathroom (floor: 1)
+        The user is in office (floor: 1) and the target is in upper bathroom (floor: 1).
         Response:
-        Exit the lower bedroom through the door_16. Take the corridor on your right to the kitchen. Continue straight into the livingroom where you will find couch_126 on you right. From there, go up the stairs_170 to the first floor. Once upstairs, pass the bicycle and go through the door_1 to enter the upper bedroom, where the tv_30 is located to your lower-right.
+        Move forward in the office and see a door_3 on your left, this is the upper bathroom’s door.
 
         ### Example 7
-        User question: where is the sink in the kitchen?
+        User question: where is the fireplace?
         Observations:
-        In frame-000000, you see sink_218 [(relative position: lower-left), (distance: mid-distance), (room: kitchen), (floor: 0)], armchair_74 [(relative position: lower-right), (distance: mid-distance), (room: living room), (floor: 0)].
-        Rooms visited in order: kitchen
+        Initially, turn right.
+        In frame-000000 you are in office on floor 1. You see fireplace_182 [(relative position: lower-left), (room: living room)], door_5 [(relative position: center-right), (room: office)].
+        Rooms visited in order:
+        office (floor: 1), living room (floor: 0)
+        The user is in office (floor: 1) and the target is in living room (floor: 0).
         Response:
-        The sink_218 is at your lower-left in the kitchen, next to the kitchen cabinet_208.
+        Start by turning right, then walk down the stairs to reach the living room. Here, you will find the fireplace_182.
+
+        ### Example 8
+        User question: where is the wall clock ?
+        Observations:
+        Initially, turn right.
+        In frame-000000 you are in office on floor 1. You see door_5 [(relative position: center-right), (room: office)], couch_125 [(relative position: lower-left), (room: office)].
+        In frame-000001 you are in office on floor 1. You see stairs_170 [(relative position: lower-center), (room: living room)], picture_135 [(relative position: center-right), (room: living room)].
+        In frame-000002 you are in living room on floor 0. You see door_8 [(relative position: center-left), (room: living room)], stairs_170 [(relative position: lower-center), (room: living room)].
+        In frame-000003 you are in living room on floor 0. You see armchair_73 [(relative position: center-right), (room: living room)], couch_126 [(relative position: lower-left), (room: living room)].
+        In frame-000004 you are in living room on floor 0. You see wall clock_205 [(relative position: center-left), (room: kitchen)], couch_126 [(relative position: lower-left), (room: living room)].
+        Rooms visited in order:
+        office (floor: 1), living room (floor: 0), kitchen (floor: 0)
+        The user is in office (floor: 1) and the target is in kitchen (floor: 0).
+        Response:
+        Start by turning right and walking straight ahead. You'll pass a couch_125 in the office. Continue forward and you'll find stairs_170 leading down to the living room. Take the stairs_170 and reach the living room, and turn left. You'll see a couch_126 on your left. Keep walking straight and you'll find the wall clock_205 in the kitchen.
+
+        ### Example 9
+        User question: where is the tv in the upper bedroom?
+        Observations:
+        Initially, turn around.
+        In frame-000000 you are in upper bedroom on floor 1. You see tv_30 [(relative position: center), (room: upper bedroom)], door_1 [(relative position: lower-right), (room: upper bedroom)].
+        Rooms visited in order:
+        upper bedroom (floor: 1)
+        The user is in upper bedroom (floor: 1) and the target is in upper bedroom (floor: 1).
+        Response:
+        Start by turning around. You can see the tv_30, in front of you.
+
+        ### Example 10
+        User question: where is the entryway?
+        Observations:
+        Initially, turn around.
+        In frame-000000 you are in upper bedroom on floor 1. You see wardrobe_26 [(relative position: lower-right), (room: upper bedroom)], door_1 [(relative position: center), (room: upper bedroom)].
+        In frame-000001 you see door_1 [(relative position: center-left), (room: upper bedroom)], bicycle_119 [(relative position: lower-center), (room: office)].
+        In frame-000002 you see bicycle_119 [(relative position: lower-left), (room: office)], couch_125 [(relative position: lower-left), (room: office)].
+        In frame-000003 you are in office on floor 1. You see door_5 [(relative position: center-right), (room: office)], stairs_170 [(relative position: lower-center), (room: living room)].
+        In frame-000004 you are in living room on floor 0. You see door_8 [(relative position: center-left), (room: living room)], stairs_170 [(relative position: lower-center), (room: living room)].
+        In frame-000005 you are in living room on floor 0. You see armchair_73 [(relative position: center-right), (room: living room)], couch_126 [(relative position: lower-left), (room: living room)].
+        In frame-000006 you are in living room on floor 0. You see couch_126 [(relative position: lower-left), (room: living room)], fireplace_182 [(relative position: lower-right), (room: living room)].
+        In frame-000007 you are in living room on floor 0. You see couch_126 [(relative position: lower-left), (room: living room)], armchair_74 [(relative position: lower-right), (room: living room)].
+        In frame-000008 you are in kitchen on floor 0. You see kitchen cabinet_208 [(relative position: center-right), (room: kitchen)], refrigerator_207 [(relative position: center-right), (room: kitchen)].
+        In frame-000009 you are in kitchen on floor 0. You see refrigerator_207 [(relative position: lower-right), (room: kitchen)], kitchen cabinet_208 [(relative position: upper-right), (room: kitchen)].
+        In frame-000010 you are in entryway on floor 0. You see door_9 [(relative position: center-left), (room: kitchen)], door_13 [(relative position: lower-right), (room: entryway)].
+        Rooms visited in order:
+        upper bedroom (floor: 1), office (floor: 1), living room (floor: 0), kitchen (floor: 0), entryway (floor: 0)
+        The user is in upper bedroom (floor: 1) and the target is in entryway (floor: 0).
+        Response:
+        Start by turning around and then proceed straight ahead. Walk through the upper bedroom, continue into the office, where you can see a bicycle_119. Continue straight and take the stairs_170 down to the living room. Keep the couch_126 to your left and go straight ahead into the kitchen. Walk to the left of the refrigerator_207 to enter the entryway.
 
         ### End of examples.
         """
     return few_shots
+
 
 def generate_description(user_prompt: str, model = None, tokenizer = None) -> str:
 
@@ -611,7 +668,6 @@ def generate_description(user_prompt: str, model = None, tokenizer = None) -> st
 
             You will then receive a user question and the list of observations from the path, as well as the rooms visited in order. Imagine you are moving from the starting room to the target location, and provide clear path instructions.
         """
-        #! TODO modify few shots with new observations (directions, floors, rooms)
         system_prompt += few_shot_examples() #! NOTE added few shot examples only for OpenAI API (out of memory issues with local model)
     
     else:

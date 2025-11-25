@@ -554,7 +554,9 @@ class NewViewer(BaseViewer):
             print("No path frames generated, aborting navigation.")
             return
         floor_number = viewer.get_floor_from_room(room_name=room_name)
-        instructions, clusters_to_draw = generate_path_description(frames, user_input=user_input, model=_LOCAL_MODEL, tokenizer=_LOCAL_TOKENIZER, dry_run=False, target_name=target_name, room_name=room_name, floor_number=floor_number) # dry run = not llm_enabled # to allow instructions but not user input menagement
+        model = _LOCAL_MODEL #! TODO set this in the generate_path_description call
+        tokenizer = _LOCAL_TOKENIZER #! TODO set this in the generate_path_description call
+        instructions, clusters_to_draw = generate_path_description(frames, user_input=user_input, model=None, tokenizer=None, dry_run=False, target_name=target_name, room_name=room_name, floor_number=floor_number) # dry run = not llm_enabled # to allow instructions but not user input menagement
         self.set_clusters_to_draw(clusters_to_draw)
 
         print("\n--- GENERATED DESCRIPTION ---\n")
