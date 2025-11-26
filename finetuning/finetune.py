@@ -23,18 +23,18 @@ OUTPUT_DIR = "phi3-mr-lora"
 training_args = TrainingArguments(
     output_dir=OUTPUT_DIR,
     overwrite_output_dir=True,
-    num_train_epochs=1,
-    per_device_train_batch_size=1,
-    per_device_eval_batch_size=1,
+    num_train_epochs=2,
+    per_device_train_batch_size=2,
+    per_device_eval_batch_size=2,
     gradient_accumulation_steps=4,       # eff. batch size 16
-    learning_rate=5e-6,                  # molto meglio per dataset piccolo
-    warmup_ratio=0.05,
-    logging_steps=5,
+    learning_rate=1e-5,                  # molto meglio per dataset piccolo
+    warmup_ratio=0.1,
+    logging_steps=25,
     logging_strategy="steps",
     eval_strategy="steps",
-    eval_steps=10,
+    eval_steps=50,
     save_strategy="steps",
-    save_steps=10,
+    save_steps=100,
     save_total_limit=3,
     load_best_model_at_end=True,
     metric_for_best_model="eval_loss",
@@ -42,23 +42,23 @@ training_args = TrainingArguments(
     bf16=True,                           # se GPU supporta, altrimenti fp16=True
     gradient_checkpointing=True,
     gradient_checkpointing_kwargs={"use_reentrant": False},
-    max_grad_norm=0.5,
-    weight_decay=0.05,
+    max_grad_norm=1.0,
+    weight_decay=0.01,
     report_to="none",
     seed=42,
 )
 
 # Standard LoRA for LLMs
 peft_config = LoraConfig(
-    r=8,
-    lora_alpha=16,
-    lora_dropout=0.1,
+    r=16,
+    lora_alpha=32,
+    lora_dropout=0.05,
     bias="none",
     task_type="CAUSAL_LM",
     target_modules=[
         "q_proj", "k_proj", "v_proj",
-        "o_proj", #"gate_proj",
-        #"up_proj", "down_proj",
+        "o_proj", "gate_proj",
+        "up_proj", "down_proj",
     ],
 )
 
