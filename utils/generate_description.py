@@ -326,7 +326,7 @@ def object_priority(obj: Dict[str, Any]) -> tuple[float, float, float, float]:
         )
 
 
-def select_n_clusters(clusters: Dict[str, Any], limit: int = 3, target_object: str = "") -> List[str]:
+def select_n_clusters(clusters: Dict[str, Any], limit: int = 3, target_object: str = "", target_room: str = "") -> List[str]:
     candidates: List[Dict[str, Any]] = []
     for cluster in clusters.values():
         label = str(cluster.get("label", "")).lower()
@@ -334,7 +334,11 @@ def select_n_clusters(clusters: Dict[str, Any], limit: int = 3, target_object: s
         cluster["priority_score"] = object_priority(cluster)[0]
         
         if target_object and label.lower().strip() == target_object.lower().strip() and target_object != "":
-            cluster["priority_score"] = 9999.0 # * Set the highest priority for the target object
+            if target_room:
+                cluster_room = cluster.get("room", "").lower()
+                if cluster_room == target_room.lower():
+                    cluster["priority_score"] = 9999.0 # * Set the highest priority for the target object in the target room
+            # cluster["priority_score"] = 9999.0 # * Set the highest priority for the target object
         if label in IGNORED_LABELS or not cluster_str_id or cluster_str_id == "":
             continue
         candidates.append(cluster)
@@ -413,7 +417,7 @@ def summarise_frames(frames: Sequence[Dict[str, Any]], num_clusters_per_frame = 
 
         turn_direction = frame.get("turn_direction")
 
-        phrases, selected_clusters  = select_n_clusters(clusters, num_clusters_per_frame, target_name)
+        phrases, selected_clusters  = select_n_clusters(clusters, num_clusters_per_frame, target_name, target_room)
         
             
         # clusters_to_draw = {"cluster_str_id": ["obj_str_id1", "obj_str_id2", ...], ...}
