@@ -700,6 +700,7 @@ def generate_description(user_prompt: str, model = None, tokenizer = None) -> st
         """
 
     # print("System prompt:\n", system_prompt)
+    user_prompt = " ".join(user_prompt.split())
     print("User prompt:\n", user_prompt)
 
     messages = [
@@ -712,13 +713,15 @@ def generate_description(user_prompt: str, model = None, tokenizer = None) -> st
             "content": user_prompt
         },
     ]
+
+    # adjust the user prompt removing newlines and extra spaces
+
+
     if COLLECT_DATA:
-        with open("data_collection.txt", "a") as f:
-            f.write("\n=== New Episode ===\n")
-            f.write("\nSystem Prompt:\n")
-            f.write(system_prompt + "\n")
-            f.write("\nUser Prompt:\n")
-            f.write(user_prompt + "\n")
+        with open("data_collection.jsonl", "a") as f:
+            # write only the user message for data collection
+            f.write(json.dumps({"role": "user", "content": user_prompt}) + ", ")
+            
     
     if model == None or tokenizer == None:
 
@@ -817,10 +820,11 @@ def generate_path_description(
                 clusters_to_draw_final[cluster_str_id] = clusters_to_draw[cluster_str_id]
     print("\nDescription before cleaning:", description)
     
+    description = " ".join(description.split())
     if COLLECT_DATA:
-        with open("data_collection.txt", "a") as f:
-            f.write("\nGenerated Description:\n")
-            f.write(description + "\n\n")
+        with open("data_collection.jsonl", "a") as f:
+            # write the model response for data collection
+            f.write(json.dumps({"role": "assistant", "content": description}) + "\n")
 
     description = clean_text_from_ids(description)
 
