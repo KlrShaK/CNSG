@@ -39,4 +39,4 @@ python -c "from huggingface_hub import hf_hub_download; import os; print('HF cac
 # ------------------------------------------------------------
 # Finetuning for MR
 # ------------------------------------------------------------
-python inference.py
+python test_comparison.py

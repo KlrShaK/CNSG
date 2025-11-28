@@ -1,288 +1,235 @@
-import logging
 import sys
-import torch
+import logging
+
+import datasets
 from datasets import load_dataset
-from peft import LoraConfig
-from transformers import (
-    AutoModelForCausalLM,
-    AutoTokenizer,
-    TrainingArguments,
-)
+from peft import LoraConfig, PeftModel
+import torch
+import transformers
 from trl import SFTTrainer
+from transformers import AutoModelForCausalLM, AutoTokenizer, TrainingArguments, BitsAndBytesConfig
+
+"""
+Adapted for navigation task finetuning
+"""
+
+logger = logging.getLogger(__name__)
 
 
-########################################
-#              CONFIG                  #
-########################################
+###################
+# Hyper-parameters
+###################
+training_config = {
+    "bf16": True,
+    "do_eval": False,
+    "learning_rate": 1.0e-05,  # MODIFICATO: da 5e-06 a 1e-05 per dataset più piccolo
+    "log_level": "info",
+    "logging_steps": 50,  # MODIFICATO: da 20 a 50
+    "logging_strategy": "steps",
+    "lr_scheduler_type": "cosine",
+    "num_train_epochs": 2,  # MODIFICATO: da 1 a 2
+    "max_steps": -1,
+    "output_dir": "./phi3-mr-lora-fixed",  # MODIFICATO: cambiato nome
+    "overwrite_output_dir": True,
+    "per_device_eval_batch_size": 2,  # MODIFICATO: da 4 a 2
+    "per_device_train_batch_size": 2,  # MODIFICATO: da 4 a 2
+    "remove_unused_columns": True,
+    "save_steps": 100,
+    "save_total_limit": 2,  # MODIFICATO: da 1 a 2
+    "seed": 42,  # MODIFICATO: da 0 a 42
+    "gradient_checkpointing": True,
+    "gradient_checkpointing_kwargs":{"use_reentrant": False},
+    "gradient_accumulation_steps": 4,  # MODIFICATO: da 1 a 4
+    "warmup_ratio": 0.1,  # MODIFICATO: da 0.2 a 0.1
+    "eval_strategy": "steps",  # AGGIUNTO
+    "eval_steps": 50,  # AGGIUNTO
+    "load_best_model_at_end": True,  # AGGIUNTO
+    "metric_for_best_model": "eval_loss",  # AGGIUNTO
+    "greater_is_better": False,  # AGGIUNTO
+    "max_grad_norm": 1.0,  # AGGIUNTO
+    "weight_decay": 0.01,  # AGGIUNTO
+    }
 
-MODEL_NAME = "microsoft/Phi-3-mini-4k-instruct"
-DATA_PATH = "finetune_data.jsonl"
-OUTPUT_DIR = "phi3-mr-lora-fixed"  # ✅ Nuovo nome per distinguere
+peft_config = {
+    "r": 16,
+    "lora_alpha": 32,
+    "lora_dropout": 0.05,
+    "bias": "none",
+    "task_type": "CAUSAL_LM",
+    "target_modules": ["q_proj", "k_proj", "v_proj", "o_proj", "gate_proj", "up_proj", "down_proj"],  # MODIFICATO: da "all-linear" a lista specifica
+    "modules_to_save": None,
+}
+train_conf = TrainingArguments(**training_config)
+peft_conf = LoraConfig(**peft_config)
 
-# ✅ Training hyperparameters - OTTIMIZZATI per 1000 samples
-training_args = TrainingArguments(
-    output_dir=OUTPUT_DIR,
-    overwrite_output_dir=True,
-    
-    num_train_epochs=2,                  # ✅ 2 epoche OK con 1000 samples
-    per_device_train_batch_size=2,       # ✅ Batch 2 invece di 1
-    gradient_accumulation_steps=4,       # ✅ Eff. batch = 8
-    
-    learning_rate=1e-5,
-    warmup_ratio=0.1,
-    
-    logging_steps=50,
-    logging_strategy="steps",
-    eval_strategy="steps",
-    eval_steps=50,                       # ✅ Più frequente per monitorare
-    
-    save_strategy="steps",
-    save_steps=100,
-    save_total_limit=3,
-    
-    load_best_model_at_end=True,
-    metric_for_best_model="eval_loss",
-    greater_is_better=False,
-    
-    bf16=True,
-    gradient_checkpointing=True,
-    gradient_checkpointing_kwargs={"use_reentrant": False},
-    max_grad_norm=1.0,
-    weight_decay=0.01,
-    
-    report_to="none",
-    seed=42,
-)
 
-# ✅ LoRA config - BILANCIATO
-peft_config = LoraConfig(
-    r=16,                                # ✅ 16 va bene per 1000 samples
-    lora_alpha=32,
-    lora_dropout=0.05,
-    bias="none",
-    task_type="CAUSAL_LM",
-    target_modules=[
-        "q_proj", "k_proj", "v_proj",
-        "o_proj", "gate_proj",
-        "up_proj", "down_proj",
-    ],
-)
-
-########################################
-#              LOGGING                 #
-########################################
-
+###############
+# Setup logging
+###############
 logging.basicConfig(
     format="%(asctime)s - %(levelname)s - %(name)s - %(message)s",
     datefmt="%Y-%m-%d %H:%M:%S",
     handlers=[logging.StreamHandler(sys.stdout)],
 )
-logger = logging.getLogger(__name__)
-logger.setLevel("INFO")
+log_level = train_conf.get_process_log_level()
+logger.setLevel(log_level)
+datasets.utils.logging.set_verbosity(log_level)
+transformers.utils.logging.set_verbosity(log_level)
+transformers.utils.logging.enable_default_handler()
+transformers.utils.logging.enable_explicit_format()
 
-logger.info("===== Phi-3 LoRA Finetuning Started (FIXED VERSION) =====")
-logger.info(f"Model: {MODEL_NAME}")
-logger.info(f"Dataset: {DATA_PATH}")
-logger.info(f"Output dir: {OUTPUT_DIR}")
+# Log on each process a small summary
+logger.warning(
+    f"Process rank: {train_conf.local_rank}, device: {train_conf.device}, n_gpu: {train_conf.n_gpu}"
+    + f" distributed training: {bool(train_conf.local_rank != -1)}, 16-bits training: {train_conf.fp16}"
+)
+logger.info(f"Training/evaluation parameters {train_conf}")
+logger.info(f"PEFT parameters {peft_conf}")
 
 
-########################################
-#       LOAD MODEL & TOKENIZER          #
-########################################
-
-logger.info("Loading base model...")
-
-tokenizer = AutoTokenizer.from_pretrained(MODEL_NAME)
-tokenizer.model_max_length = 2048
-tokenizer.pad_token = tokenizer.eos_token      # ✅ FIX
-tokenizer.pad_token_id = tokenizer.eos_token_id
-tokenizer.padding_side = "right"
-
-# ✅ DEBUG: Verifica tokenizer config
-logger.info(f"✅ Tokenizer pad_token: {tokenizer.pad_token}")
-logger.info(f"✅ Tokenizer pad_token_id: {tokenizer.pad_token_id}")
-logger.info(f"✅ Tokenizer eos_token: {tokenizer.eos_token}")
-logger.info(f"✅ Tokenizer eos_token_id: {tokenizer.eos_token_id}")
-logger.info(f"✅ Tokenizer model_max_length: {tokenizer.model_max_length}")
-
-model = AutoModelForCausalLM.from_pretrained(
-    MODEL_NAME,
-    dtype=torch.bfloat16,
-    device_map="auto",
+################
+# Model Loading
+################
+checkpoint_path = "microsoft/Phi-3-mini-4k-instruct"
+model_kwargs = dict(
     use_cache=False,
     trust_remote_code=True,
-    attn_implementation="eager",
+    attn_implementation="eager",  # MODIFICATO: da "flash_attention_2" a "eager" (non hai flash attention)
+    torch_dtype=torch.bfloat16,
+    device_map="auto"  # MODIFICATO: da None a "auto"
 )
-
-logger.info("Model and tokenizer loaded.")
-
-
-########################################
-#               DATASET                #
-########################################
-
-logger.info("Loading dataset...")
-
-raw_dataset = load_dataset(
-    "json",
-    data_files={"train": DATA_PATH}
-)
-
-# ✅ DEBUG: Mostra dataset raw
-logger.info(f"✅ Total samples loaded: {len(raw_dataset['train'])}")
-logger.info("\n" + "-" * 80)
-logger.info("📋 RAW SAMPLE #0 (before processing):")
-logger.info("-" * 80)
-sample = raw_dataset["train"][0]
-for i, msg in enumerate(sample["messages"]):
-    logger.info(f"  Message {i} [{msg['role']}]:")
-    content_preview = msg["content"][:200] + "..." if len(msg["content"]) > 200 else msg["content"]
-    logger.info(f"    {content_preview}")
-
-# Train / test split (5%)
-train_test = raw_dataset["train"].train_test_split(test_size=0.05, seed=42)
-train_dataset = train_test["train"]
-eval_dataset = train_test["test"]
-logger.info(f"Train samples: {len(train_dataset)}")
-logger.info(f"Eval samples:  {len(eval_dataset)}")
+model = AutoModelForCausalLM.from_pretrained(checkpoint_path, **model_kwargs)
+tokenizer = AutoTokenizer.from_pretrained(checkpoint_path)
+tokenizer.model_max_length = 2048
+tokenizer.pad_token = tokenizer.eos_token  # MODIFICATO: da unk_token a eos_token (fix critico)
+tokenizer.pad_token_id = tokenizer.eos_token_id  # MODIFICATO: usa eos_token_id
+tokenizer.padding_side = 'right'
 
 
-def apply_chat_template(example):
+##################
+# Data Processing
+##################
+def apply_chat_template(
+    example,
+    tokenizer,
+):
+    messages = example["messages"]
     example["text"] = tokenizer.apply_chat_template(
-        example["messages"],
-        tokenize=False,
-        add_generation_prompt=True,  # ✅ CRITICAL FIX
-    )
+        messages, tokenize=False, add_generation_prompt=False)  # MODIFICATO: da False a True (fix critico!)
     return example
 
+# MODIFICATO: cambiato dataset
+raw_dataset = load_dataset("json", data_files={"train": "finetune_data.jsonl"})
+train_test = raw_dataset["train"].train_test_split(test_size=0.05, seed=42)
+train_dataset = train_test["train"]
+test_dataset = train_test["test"]
 
-logger.info("Applying chat template...")
+column_names = list(train_dataset.features)
 
-train_dataset = train_dataset.map(
+processed_train_dataset = train_dataset.map(
     apply_chat_template,
-    remove_columns=["messages"],
-    desc="Processing train set",
+    fn_kwargs={"tokenizer": tokenizer},
+    num_proc=1,  # MODIFICATO: da 10 a 1 (più sicuro con dataset piccolo)
+    remove_columns=column_names,
+    desc="Applying chat template to train",
 )
 
-eval_dataset = eval_dataset.map(
+processed_test_dataset = test_dataset.map(
     apply_chat_template,
-    remove_columns=["messages"],
-    desc="Processing eval set",
+    fn_kwargs={"tokenizer": tokenizer},
+    num_proc=1,  # MODIFICATO: da 10 a 1
+    remove_columns=column_names,
+    desc="Applying chat template to test",
 )
 
-# ✅ DEBUG: Mostra processed sample
-logger.info("\n" + "-" * 80)
-logger.info("📋 PROCESSED SAMPLE #0 (after chat template):")
-logger.info("-" * 80)
-processed_sample = train_dataset[0]["text"]
-logger.info(f"Length: {len(processed_sample)} chars")
-logger.info("\nFirst 500 chars:")
-logger.info(processed_sample[:500])
-logger.info("\n...")
-logger.info("\nLast 300 chars:")
-logger.info(processed_sample[-300:])
 
-# ✅ DEBUG: Verifica che termini con <|assistant|>
-if "<|assistant|>" in processed_sample[-50:]:
-    logger.info("✅ CORRECT: Sample ends with <|assistant|> (generation prompt)")
-else:
-    logger.warning("⚠️  WARNING: Sample does NOT end with <|assistant|>")
-    logger.info(f"   Actual ending: ...{processed_sample[-100:]}")
-
-# ✅ DEBUG: Statistiche dataset
-logger.info("\n" + "-" * 80)
-logger.info("📊 DATASET STATISTICS:")
-logger.info("-" * 80)
-lengths = [len(sample["text"]) for sample in train_dataset]
-logger.info(f"  Min length: {min(lengths)} chars")
-logger.info(f"  Max length: {max(lengths)} chars")
-logger.info(f"  Avg length: {sum(lengths)/len(lengths):.1f} chars")
-
-
-########################################
-#               TRAINING               #
-########################################
-
-logger.info("Initializing SFTTrainer...")
-
+###########
+# Training
+###########
 trainer = SFTTrainer(
     model=model,
+    args=train_conf,
+    peft_config=peft_conf,
+    train_dataset=processed_train_dataset,
+    eval_dataset=processed_test_dataset,
     processing_class=tokenizer,
-    args=training_args,
-    peft_config=peft_config,
-    train_dataset=train_dataset,
-    eval_dataset=eval_dataset,
 )
-
-# ✅ DEBUG: Verifica parametri trainer
-logger.info("Training configuration:")
-logger.info(f"  Epochs: {training_args.num_train_epochs}")
-logger.info(f"  Batch size: {training_args.per_device_train_batch_size}")
-logger.info(f"  Gradient accumulation: {training_args.gradient_accumulation_steps}")
-logger.info(f"  Effective batch size: {training_args.per_device_train_batch_size * training_args.gradient_accumulation_steps}")
-logger.info(f"  Learning rate: {training_args.learning_rate}")
-logger.info(f"  LoRA rank: {peft_config.r}")
-logger.info(f"  LoRA alpha: {peft_config.lora_alpha}")
-
-# ✅ DEBUG: Verifica packing è disabilitato
-logger.info("\n" + "-" * 80)
-if hasattr(trainer, 'packing') and trainer.packing:
-    logger.error("❌ ERROR: Packing is ENABLED! This will break training!")
-    sys.exit(1)
-else:
-    logger.info("✅ VERIFIED: Packing is DISABLED")
-
-# ✅ DEBUG: Conta parametri trainable
-trainable_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
-total_params = sum(p.numel() for p in model.parameters())
-logger.info(f"\n📊 Model parameters:")
-logger.info(f"  Trainable: {trainable_params:,}")
-logger.info(f"  Total: {total_params:,}")
-logger.info(f"  Trainable %: {100 * trainable_params / total_params:.2f}%")
-
-logger.info("Starting training...")
-
 train_result = trainer.train()
-
-logger.info("Training complete.")
-
-trainer.log_metrics("train", train_result.metrics)
-trainer.save_metrics("train", train_result.metrics)
+metrics = train_result.metrics
+trainer.log_metrics("train", metrics)
+trainer.save_metrics("train", metrics)
 trainer.save_state()
 
 
-########################################
-#               EVAL                   #
-########################################
-
-logger.info("Evaluating...")
-
-tokenizer.padding_side = "left"
+#############
+# Evaluation
+#############
+tokenizer.padding_side = 'left'
 metrics = trainer.evaluate()
-metrics["eval_samples"] = len(eval_dataset)
-
+metrics["eval_samples"] = len(processed_test_dataset)
 trainer.log_metrics("eval", metrics)
 trainer.save_metrics("eval", metrics)
 
-# ✅ DEBUG: Mostra metriche finali
-logger.info("\n" + "-" * 80)
-logger.info("📊 FINAL METRICS:")
-logger.info("-" * 80)
-for key, value in metrics.items():
-    if isinstance(value, float):
-        logger.info(f"  {key}: {value:.4f}")
-    else:
-        logger.info(f"  {key}: {value}")
+
+############
+# Save model
+############
+trainer.save_model(train_conf.output_dir)
 
 
 ########################################
-#              SAVE MODEL              #
+# AGGIUNTO: INFERENCE TEST
 ########################################
+logger.info("\n" + "=" * 80)
+logger.info("Running inference tests...")
+logger.info("=" * 80)
 
-logger.info("Saving LoRA adapter...")
-trainer.save_model(OUTPUT_DIR)
+# Load finetuned model
+test_model = PeftModel.from_pretrained(
+    model,
+    train_conf.output_dir,
+    torch_dtype=torch.bfloat16,
+)
+test_model.eval()
 
-logger.info("===== Finetuning Completed =====")
+# System prompt
+SYSTEM_PROMPT = "You are a navigation assistant helping the user locate a target object inside a building.You will receive a sequence of frames describing visible objects. Each object includes:  - the floor,  - the relative position to the viewer,  - the distance from the viewer,  - and the room it belongs to.The frames appear in chronological order along the user's path from the starting point toward the target.Before starting the walk description, consider an initial turn direction if provided.Your task is to write a human-sounding description of the path.  Avoid technical language or numeric measurements. Use intuitive guidance and stay under 120 words (using fewer words when possible).Mention at least one and at most two objects per room, choosing only the most informative for navigation.  If the path includes stairs, simply write: \"go up/down the stairs to reach the <room_name>\", without describing objects on the stairs.If you see the target location or object, mention it immediately and stop referencing any further objects.Only refer to objects that appear in the observations. Never invent or embellish details.Use the object IDs when referencing them (e.g., 'chair_5').You will then receive a user question and the list of observations from the path, as well as the rooms visited in order. Imagine you are moving from the starting room to the target location, and provide clear path instructions."
+
+# Test sample
+TEST_PROMPT = "User question: How do I get to the upper bedroom? Observations: Initially, turn left. In frame-000000 you are in living room on floor 0. You see stairs_170 [(relative position: lower-center), (room: living room)], picture_136 [(relative position: center-left), (room: living room)]. From previous frame, continue forward. In frame-000001 you are in living room on floor 0. You see stairs_170 [(relative position: lower-center), (room: living room)], couch_125 [(relative position: lower-right), (room: office)]. From previous frame, continue forward. In frame-000002 you are in office on floor 1. You see door_1 [(relative position: center-right), (room: upper bedroom)], wardrobe_27 [(relative position: lower-right), (room: upper bedroom)]. From previous frame, continue forward. In frame-000003 you are in upper bedroom on floor 1. You see bed_40 [(relative position: center-left), (room: upper bedroom)], armchair_72 [(relative position: lower-right), (room: upper bedroom)]. Rooms visited in order: living room (floor: 0), office (floor: 1), upper bedroom (floor: 1) The user is in living room (floor: 0) and the target is in upper bedroom (floor: 1)."
+
+messages = [
+    {"role": "system", "content": SYSTEM_PROMPT},
+    {"role": "user", "content": TEST_PROMPT}
+]
+
+prompt = tokenizer.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
+inputs = tokenizer(prompt, return_tensors="pt").to(test_model.device)
+input_len = inputs['input_ids'].shape[1]
+
+logger.info(f"Generating response for test sample...")
+
+with torch.no_grad():
+    outputs = test_model.generate(
+        **inputs,
+        max_new_tokens=120,
+        temperature=0.3,
+        do_sample=True,
+        pad_token_id=tokenizer.pad_token_id,
+        eos_token_id=tokenizer.eos_token_id,
+        use_cache=False,
+    )
+
+response = tokenizer.decode(outputs[0][input_len:], skip_special_tokens=True)
+
+logger.info("\n" + "=" * 80)
+logger.info("GENERATED RESPONSE:")
+logger.info("=" * 80)
+logger.info(response)
+logger.info("=" * 80)
+logger.info(f"\nTraining completed! Model saved to: {train_conf.output_dir}")
+
+#######
 
 ########################################
 #          INFERENCE TEST              #
@@ -297,7 +244,7 @@ from peft import PeftModel
 # Load the finetuned model
 test_model = PeftModel.from_pretrained(
     model,
-    OUTPUT_DIR,
+    train_conf.output_dir,
     torch_dtype=torch.bfloat16,
 )
 test_model.eval()
@@ -460,6 +407,6 @@ else:
 logger.info("\n" + "=" * 80)
 logger.info("✅✅✅ FINETUNING COMPLETED SUCCESSFULLY ✅✅✅")
 logger.info("=" * 80)
-logger.info(f"\nModel saved at: {OUTPUT_DIR}")
+logger.info(f"\nModel saved at: {train_conf.output_dir}")
 logger.info("You can now use this model for inference!")
 logger.info("=" * 80)
