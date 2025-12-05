@@ -4,6 +4,8 @@ models/*
 runs/
 output*/
 
+build/
+
 **/__pycache__
 *.pyc
 
@@ -11,3 +13,5 @@ output*/
 finetuning/logs/
 finetuning/phi3-*
 finetuning/raw_examples.txt
+
+
