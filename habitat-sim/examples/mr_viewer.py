@@ -134,6 +134,11 @@ class NewViewer(BaseViewer):
 
         self.save_semantic_image()
 
+        print(self.sim.semantic_scene)
+        print("Objects:", self.sim.semantic_scene.objects)
+        print("Levels:", self.sim.semantic_scene.levels)
+        print("Regions:", self.sim.semantic_scene.regions)
+
 
         # self.print_scene_semantic_info()
 
