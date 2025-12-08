@@ -13,8 +13,7 @@ from pathlib import Path
 from shlex import quote
 
 ROOT = Path(__file__).resolve().parents[1]
-sys.path.append(str(ROOT / "src"))
-from utils.config_utils import load_paths  # noqa: E402
+from src.utils.config_utils import load_paths  # noqa: E402
 
 p = load_paths()
 print(f'SESSION_DIR={quote(str(p.session_dir))}')

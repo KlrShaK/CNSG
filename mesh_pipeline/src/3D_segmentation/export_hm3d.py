@@ -130,13 +130,105 @@ def main() -> None:
         line = f'{uid},{hex_code},"{clean_name}",16'
         txt_lines.append(line)
 
-    # 3. Assign Colors to Mesh
-    mesh.visual.vertex_colors = vertex_colors
+    # 3. Assign Colors to Mesh (ensure ColorVisuals are used)
+    try:
+        # Prefer explicit ColorVisuals to guarantee vertex color accessors
+        from trimesh.visual import ColorVisuals
 
-    # 4. Export GLB
+        mesh.visual = ColorVisuals(mesh=mesh, vertex_colors=vertex_colors)
+    except Exception:
+        # Fallback: set the vertex_colors attribute directly
+        mesh.visual.vertex_colors = vertex_colors
+
+    # 4. Export GLB (force file_type to 'glb' so exporter uses correct writer)
     print(f"Exporting {OUTPUT_GLB}...")
-    # Trimesh automatically exports vertex colors as COLOR_0 accessor
-    mesh.export(str(OUTPUT_GLB))
+    try:
+        mesh.export(str(OUTPUT_GLB), file_type='glb')
+    except Exception:
+        # older trimesh versions may ignore file_type, try default export
+        mesh.export(str(OUTPUT_GLB))
+
+    # Quick diagnostic (optional): check whether exported GLB contains COLOR_0
+    try:
+        from pygltflib import GLTF2
+        g = GLTF2().load(str(OUTPUT_GLB))
+        prim_attrs = {}
+        if g.meshes and len(g.meshes) > 0 and g.meshes[0].primitives:
+            prim_attrs = g.meshes[0].primitives[0].attributes
+        if not prim_attrs or 'COLOR_0' not in prim_attrs:
+            print('Warning: exported GLB does not contain COLOR_0 attribute (vertex colors).')
+        else:
+            print('DEBUG: exported GLB contains COLOR_0 vertex color attribute.')
+    except Exception:
+        # pygltflib not installed or parse error; skip diagnostic
+        pass
+
+    # Post-process exported GLB to ensure viewers use vertex colors
+    # - remove any baseColorTexture references from materials (so textures don't override vertex colors)
+    # - ensure there's at least one material and assign a fallback material to primitives missing `material`
+    try:
+        import struct
+        glb_path = str(OUTPUT_GLB)
+        with open(glb_path, 'rb') as f:
+            header = f.read(12)
+            if len(header) >= 12:
+                # parse GLB header to extract version
+                magic, version, length = struct.unpack('<4sII', header)
+                # read first chunk header
+                chunk_header = f.read(8)
+                if len(chunk_header) >= 8:
+                    json_len, json_type = struct.unpack('<I4s', chunk_header)
+                    json_bytes = f.read(json_len)
+                    rest = f.read()
+                    try:
+                        js = json.loads(json_bytes.decode('utf-8'))
+                    except Exception:
+                        js = json.loads(json_bytes.decode('utf-8', 'ignore'))
+
+                    meshes = js.get('meshes', [])
+                    materials = js.get('materials')
+                    # sanitize existing materials: drop baseColorTexture if present
+                    if materials:
+                        for m in materials:
+                            pbr = m.get('pbrMetallicRoughness')
+                            if isinstance(pbr, dict) and 'baseColorTexture' in pbr:
+                                del pbr['baseColorTexture']
+                                if 'baseColorFactor' not in pbr:
+                                    pbr['baseColorFactor'] = [1.0, 1.0, 1.0, 1.0]
+
+                    # ensure materials array exists and add fallback material
+                    if 'materials' not in js or not js.get('materials'):
+                        js['materials'] = []
+                    # create fallback material
+                    fallback = {
+                        'name': 'vertexcolor_fallback',
+                        'pbrMetallicRoughness': {
+                            'baseColorFactor': [1.0, 1.0, 1.0, 1.0],
+                            'metallicFactor': 0.0
+                        }
+                    }
+                    js['materials'].append(fallback)
+                    fallback_index = len(js['materials']) - 1
+
+                    # assign fallback material to any primitive missing 'material'
+                    for mesh in meshes:
+                        for prim in mesh.get('primitives', []):
+                            if 'material' not in prim:
+                                prim['material'] = fallback_index
+
+                    # write back modified GLB (keep binary chunk(s) unchanged)
+                    new_json = json.dumps(js, separators=(',', ':'), ensure_ascii=False).encode('utf-8')
+                    pad_len = (4 - (len(new_json) % 4)) % 4
+                    new_json += b' ' * pad_len
+                    total_len = 12 + 8 + len(new_json) + len(rest)
+                    with open(glb_path, 'wb') as out_f:
+                        out_f.write(struct.pack('<4sII', b'glTF', version, total_len))
+                        out_f.write(struct.pack('<I4s', len(new_json), b'JSON'))
+                        out_f.write(new_json)
+                        out_f.write(rest)
+                    print('Post-processed GLB: ensured fallback material and removed baseColorTexture refs')
+    except Exception as e:
+        print('Warning: GLB post-process failed:', e)
 
     # 5. Export TXT
     print(f"Exporting {OUTPUT_TXT}...")
