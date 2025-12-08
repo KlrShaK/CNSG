@@ -82,6 +82,7 @@ class NewViewer(BaseViewer):
         super().__init__(sim_settings)
         self.q_app = q_app
         self.objects = {}
+        self.cnt = 0
         self.clusters_to_draw = None # List of 'Numbers' e.g. ['1', '645', ...]
         self.prev_objs_to_draw = None
         self.action_queue = queue.Queue()
@@ -122,6 +123,7 @@ class NewViewer(BaseViewer):
             map_room_id_to_name=self.map_room_id_to_name,
             ignore_categories=ignore_categories,
         )
+        print(f"[PIPPO] Semantic info loaded: {semantic_info}")
 
         self.room_objects_occurences = semantic_info
 
@@ -130,9 +132,24 @@ class NewViewer(BaseViewer):
         self.clusters = self.cluster_objs(distance_thresh=0.5)
         self.rooms = self.get_rooms_from_sim()
 
+        self.save_semantic_image()
+
 
         # self.print_scene_semantic_info()
 
+    def save_semantic_image(self) -> None:
+        observations = self.sim.get_sensor_observations()
+        rgb = observations.get("color_sensor", None)
+        semantic = observations.get("semantic_sensor", None)
+
+        if rgb is not None:
+            if semantic is not None:
+                self.display_sample(rgb_obs=rgb, semantic_obs=semantic)
+            else:
+                self.display_sample(rgb_obs=rgb)
+            print("Semantic image saved in folder output.")
+        else:
+            print("No semantic sensor found in observations.")
 
     def get_semantic_info(self, file_path, map_room_id_to_name, ignore_categories=[]):
         semantic_info = {}
@@ -188,6 +205,9 @@ class NewViewer(BaseViewer):
         objs_rooms = {}
         rooms_floors = {} # 
         rooms_heights = []
+        print("[PLUTO] Regions in the scene: ", self.scene.regions)
+        for region in self.scene.regions:
+            print(f"[PLUTO] Region ID: {region.id}, Objects: {[obj.id for obj in region.objects]}")
         for region in self.scene.regions:
             region_id = region.id.strip("_").lower() if region and region.id else ""
             room_name = self.map_room_id_to_name.get(region_id, {}).get("name", "unknown_room")
@@ -1716,6 +1736,15 @@ class NewViewer(BaseViewer):
         super().move_and_look(repetitions)
 
         self._process_queued_actions()  # process any queued actions from the other thread
+
+
+        #############
+        #! TODO remove
+        if self.cnt % 200 == 0:
+            self.save_semantic_image()
+        self.cnt += 1
+
+        #################
         
     def _process_queued_actions(self):
         """Execute actions enqueued from other threads."""
@@ -2159,13 +2188,16 @@ if __name__ == "__main__":
     # optional arguments
     parser.add_argument(
         "--scene",
-        default="./data/scene_datasets/hm3d/minival/00800-TEEsavR23oF/TEEsavR23oF.basis.glb",
+        # default="./data/scene_datasets/hm3d/minival/00800-TEEsavR23oF/TEEsavR23oF.basis.glb",
+        default="./data/scene_datasets/HG_E_mesh_06_12_2025/HG_E.basis.glb",
+
         type=str,
         help='scene/stage file to load (default: "./data/test_assets/scenes/simple_room.glb")',
     )
     parser.add_argument(
         "--dataset",
-        default="./data/scene_datasets/hm3d/hm3d_annotated_basis.scene_dataset_config.json",
+        # default="./data/scene_datasets/hm3d/hm3d_annotated_basis.scene_dataset_config.json",
+        default="default",
         type=str,
         metavar="DATASET",
         help='dataset configuration file to use (default: "default")',
