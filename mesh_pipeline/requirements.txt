@@ -1,0 +1,12 @@
+torch
+transformers
+open3d
+numpy
+scipy
+tqdm
+pillow
+trimesh
+opencv-python
+pyyaml
+scikit-learn
+gdown

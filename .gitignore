@@ -14,4 +14,5 @@ finetuning/logs/
 finetuning/phi3-*
 finetuning/raw_examples.txt
 
-
+mesh_pipeline/data/*
+mesh_pipeline/.vscode/*

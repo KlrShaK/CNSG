@@ -1,0 +1,31 @@
+paths:
+  # Root folder where all datasets and outputs live
+  data_root: data
+
+  # Session folder downloaded by scripts/download_data.sh
+  session_name: navvis_2022-02-06_12.55.11
+
+  # Subdirectories/files inside the session
+  raw_images_subdir: raw_data/images_undistr_center
+  raw_pointcloud_filename: raw_data/pointcloud.ply
+  depth_maps_subdir: depth_maps
+  semantic_masks_subdir: semantic_masks
+  trajectories_file: trajectories.txt
+  images_file: images.txt
+  sensors_file: sensors.txt
+
+  # Mesh and label assets stored alongside the data root
+  poisson_mesh_filename: HG_E_poisson.ply
+  mesh_filename: HG_E_cut.voxelized.ply
+  fused_mesh_filename: HG_E_semantic.ply
+  fused_ids_filename: HG_E_semantic_ids.npy
+  fused_mesh_clean_filename: HG_E_semantic_clean.ply
+  fused_ids_clean_filename: HG_E_semantic_ids_clean.npy
+  trimesh_labels_filename: HG_E_cut_ids_trimesh.npy
+
+  # Habitat export outputs
+  hm3d_glb_filename: HG_E.semantic.glb
+  hm3d_txt_filename: HG_E.semantic.txt
+
+  # Segmentation label metadata
+  segmentation_config: config/segmentation_config.json
