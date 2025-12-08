@@ -9,9 +9,9 @@ from transformers import AutoModelForCausalLM, AutoTokenizer
 ########################################
 
 BASE_MODEL = "microsoft/Phi-3-mini-4k-instruct"
-LORA_ADAPTER = "phi3-mr-lora-fixed"
+LORA_ADAPTER = "phi3-mr-lora-fixed-v2"
 TRAINING_DATA = "finetune_data.jsonl"
-NUM_SAMPLES = 5
+NUM_SAMPLES = 15
 
 ########################################
 #          LOAD DATA                   #

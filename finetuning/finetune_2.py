@@ -8,6 +8,7 @@ import torch
 import transformers
 from trl import SFTTrainer
 from transformers import AutoModelForCausalLM, AutoTokenizer, TrainingArguments, BitsAndBytesConfig
+import json
 
 """
 Adapted for navigation task finetuning
@@ -21,33 +22,33 @@ logger = logging.getLogger(__name__)
 ###################
 training_config = {
     "bf16": True,
-    "do_eval": False,
-    "learning_rate": 1.0e-05,  # MODIFICATO: da 5e-06 a 1e-05 per dataset più piccolo
+    "do_eval": True,
+    "learning_rate": 2.0e-05,
     "log_level": "info",
-    "logging_steps": 50,  # MODIFICATO: da 20 a 50
+    "logging_steps": 50, 
     "logging_strategy": "steps",
     "lr_scheduler_type": "cosine",
-    "num_train_epochs": 2,  # MODIFICATO: da 1 a 2
+    "num_train_epochs": 3, 
     "max_steps": -1,
-    "output_dir": "./phi3-mr-lora-fixed",  # MODIFICATO: cambiato nome
+    "output_dir": "./phi3-mr-lora-fixed-v2", 
     "overwrite_output_dir": True,
-    "per_device_eval_batch_size": 2,  # MODIFICATO: da 4 a 2
-    "per_device_train_batch_size": 2,  # MODIFICATO: da 4 a 2
+    "per_device_eval_batch_size": 2,
+    "per_device_train_batch_size": 2,
     "remove_unused_columns": True,
     "save_steps": 100,
-    "save_total_limit": 2,  # MODIFICATO: da 1 a 2
-    "seed": 42,  # MODIFICATO: da 0 a 42
+    "save_total_limit": 2, 
+    "seed": 42, 
     "gradient_checkpointing": True,
     "gradient_checkpointing_kwargs":{"use_reentrant": False},
-    "gradient_accumulation_steps": 4,  # MODIFICATO: da 1 a 4
-    "warmup_ratio": 0.1,  # MODIFICATO: da 0.2 a 0.1
-    "eval_strategy": "steps",  # AGGIUNTO
-    "eval_steps": 50,  # AGGIUNTO
-    "load_best_model_at_end": True,  # AGGIUNTO
-    "metric_for_best_model": "eval_loss",  # AGGIUNTO
-    "greater_is_better": False,  # AGGIUNTO
-    "max_grad_norm": 1.0,  # AGGIUNTO
-    "weight_decay": 0.01,  # AGGIUNTO
+    "gradient_accumulation_steps": 4,
+    "warmup_ratio": 0.1, 
+    "eval_strategy": "steps",
+    "eval_steps": 50,
+    "load_best_model_at_end": True,
+    "metric_for_best_model": "eval_loss",
+    "greater_is_better": False,
+    "max_grad_norm": 1.0,
+    "weight_decay": 0.01,
     }
 
 peft_config = {
@@ -56,7 +57,7 @@ peft_config = {
     "lora_dropout": 0.05,
     "bias": "none",
     "task_type": "CAUSAL_LM",
-    "target_modules": ["q_proj", "k_proj", "v_proj", "o_proj", "gate_proj", "up_proj", "down_proj"],  # MODIFICATO: da "all-linear" a lista specifica
+    "target_modules": ["q_proj", "k_proj", "v_proj", "o_proj", "gate_proj", "up_proj", "down_proj"],
     "modules_to_save": None,
 }
 train_conf = TrainingArguments(**training_config)
@@ -104,6 +105,28 @@ tokenizer.model_max_length = 2048
 tokenizer.pad_token = tokenizer.eos_token  # MODIFICATO: da unk_token a eos_token (fix critico)
 tokenizer.pad_token_id = tokenizer.eos_token_id  # MODIFICATO: usa eos_token_id
 tokenizer.padding_side = 'right'
+
+########################################
+#        DATASET PRE-CHECKS            #
+########################################
+
+with open("finetune_data.jsonl", 'r') as f:
+    samples = [json.loads(line) for line in f]
+
+# Check 1: Tutti hanno assistant response?
+for i, s in enumerate(samples[:5]):
+    msgs = s["messages"]
+    if len(msgs) != 3 or msgs[2]["role"] != "assistant":
+        print(f"❌ Sample {i} malformato!")
+    else:
+        print(f"✅ Sample {i} OK - response: {msgs[2]['content'][:50]}...")
+
+# Check 2: Diversity
+user_prompts = [s["messages"][1]["content"] for s in samples]
+unique_starts = len(set(p[:100] for p in user_prompts))
+print(f"\n📊 Diversity: {unique_starts}/{len(samples)} unique prompt starts")
+if unique_starts < len(samples) * 0.7:
+    print("⚠️ Warning: Low diversity, many similar samples")
 
 
 ##################

@@ -17,18 +17,18 @@ from trl import SFTTrainer
 
 MODEL_NAME = "microsoft/Phi-3-mini-4k-instruct"
 DATA_PATH = "finetune_data.jsonl"
-OUTPUT_DIR = "phi3-mr-lora-fixed"  # ✅ Nuovo nome per distinguere
+OUTPUT_DIR = "phi3-mr-lora-fixed-v2"  # ✅ Nuovo nome per distinguere
 
 # ✅ Training hyperparameters - OTTIMIZZATI per 1000 samples
 training_args = TrainingArguments(
     output_dir=OUTPUT_DIR,
     overwrite_output_dir=True,
     
-    num_train_epochs=2,                  # ✅ 2 epoche OK con 1000 samples
+    num_train_epochs=3,                  # ✅ 2 epoche OK con 1000 samples
     per_device_train_batch_size=2,       # ✅ Batch 2 invece di 1
-    gradient_accumulation_steps=4,       # ✅ Eff. batch = 8
+    gradient_accumulation_steps=8,       # ✅ Eff. batch = 8
     
-    learning_rate=1e-5,
+    learning_rate=2e-5,
     warmup_ratio=0.1,
     
     logging_steps=50,
@@ -56,8 +56,8 @@ training_args = TrainingArguments(
 
 # ✅ LoRA config - BILANCIATO
 peft_config = LoraConfig(
-    r=16,                                # ✅ 16 va bene per 1000 samples
-    lora_alpha=32,
+    r=32,                                # ✅ 16 va bene per 1000 samples
+    lora_alpha=64,
     lora_dropout=0.05,
     bias="none",
     task_type="CAUSAL_LM",
@@ -151,7 +151,7 @@ def apply_chat_template(example):
     example["text"] = tokenizer.apply_chat_template(
         example["messages"],
         tokenize=False,
-        add_generation_prompt=True,  # ✅ CRITICAL FIX
+        add_generation_prompt=False,  # ✅ CRITICAL FIX
     )
     return example
 
