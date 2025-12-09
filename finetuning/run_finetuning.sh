@@ -2,7 +2,7 @@
 #SBATCH --job-name=finetuning_mr
 #SBATCH --output=logs/finetuning_mr_%j.out
 #SBATCH --error=logs/finetuning_mr_%j.err
-#SBATCH --time=02:00:00
+#SBATCH --time=03:00:00
 #SBATCH --gpus=nvidia_geforce_rtx_4090:1
 #SBATCH --cpus-per-task=2
 #SBATCH --mem-per-cpu=8G
