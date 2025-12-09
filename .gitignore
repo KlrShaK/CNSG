@@ -13,5 +13,7 @@ build/
 finetuning/logs/
 finetuning/phi3-*
 finetuning/raw_examples.txt
+mesh_pipeline
+
 
 

@@ -114,6 +114,7 @@ class NewViewer(BaseViewer):
         if os.path.exists(map_file_path):
             with open(map_file_path, "r", encoding="utf-8") as f:
                 self.map_room_id_to_name = json.load(f)
+                print(f"Room ID to name map loaded: {self.map_room_id_to_name}")
         else:
             raise FileNotFoundError(f"Map file not found: {map_file_path}")
 
@@ -146,6 +147,20 @@ class NewViewer(BaseViewer):
         observations = self.sim.get_sensor_observations()
         rgb = observations.get("color_sensor", None)
         semantic = observations.get("semantic_sensor", None)
+        # Diagnostic prints to help debug semantic observation format
+        if semantic is not None:
+            try:
+                import numpy as _np
+
+                print(f"[DIAG] semantic_obs: shape={getattr(semantic, 'shape', None)}, dtype={getattr(semantic, 'dtype', None)}")
+                if hasattr(semantic, 'shape'):
+                    s = semantic
+                    if getattr(s, 'ndim', None) == 2:
+                        print(f"[DIAG] semantic min/max: {_np.min(s)}, {_np.max(s)}; unique_count: {len(_np.unique(s))}")
+                    elif getattr(s, 'ndim', None) == 3:
+                        print(f"[DIAG] semantic 3-channel image; shape={s.shape}; sample pixels: {s.reshape(-1, s.shape[2])[:10]}")
+            except Exception:
+                pass
 
         if rgb is not None:
             if semantic is not None:
@@ -316,9 +331,11 @@ class NewViewer(BaseViewer):
         
             region_id = region.id.strip("_").lower() if region and region.id else ""
             room_name = self.map_room_id_to_name.get(region_id, {}).get("name", "unknown_room")
+            
+            print(f"[PLUTO] Processing region_id: {region_id}, room_name: {room_name}")
             if "unknown" in room_name.lower():
                 continue 
-
+            rooms[region_id] = {}
             room_height = self.map_room_id_to_name.get(region_id, {})["position"][1]
             rooms_heights.append(room_height)
       
@@ -2201,8 +2218,8 @@ if __name__ == "__main__":
     )
     parser.add_argument(
         "--dataset",
-        # default="./data/scene_datasets/hm3d/hm3d_annotated_basis.scene_dataset_config.json",
-        default="default",
+        # default dataset config: changed to local HG_E dataset to auto-load semantics
+        default="data/scene_datasets/HG_E_mesh_06_12_2025/HG_E.scene_dataset_config.json",
         type=str,
         metavar="DATASET",
         help='dataset configuration file to use (default: "default")',
