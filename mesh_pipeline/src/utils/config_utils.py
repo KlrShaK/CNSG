@@ -39,6 +39,7 @@ class SegmentationPaths:
     trimesh_labels: Path
     hm3d_glb: Path
     hm3d_txt: Path
+    hm3d_scn: Path
     segmentation_config: Path
 
 
@@ -114,7 +115,7 @@ def load_paths(config_path: Path = CONFIG_PATH) -> SegmentationPaths:
 
     hm3d_glb = _resolve_path(paths_cfg.get("hm3d_glb_filename", "HG_E.semantic.glb"), data_root)
     hm3d_txt = _resolve_path(paths_cfg.get("hm3d_txt_filename", "HG_E.semantic.txt"), data_root)
-
+    hm3d_scn = _resolve_path(paths_cfg.get("hm3d_scn_filename", "HG_E.semantic.scn"), data_root)
     segmentation_config = _resolve_path(
         paths_cfg.get("segmentation_config", "config/segmentation_config.json"),
         repo_root,
@@ -140,5 +141,6 @@ def load_paths(config_path: Path = CONFIG_PATH) -> SegmentationPaths:
         trimesh_labels=trimesh_labels,
         hm3d_glb=hm3d_glb,
         hm3d_txt=hm3d_txt,
+        hm3d_scn=hm3d_scn,
         segmentation_config=segmentation_config,
     )

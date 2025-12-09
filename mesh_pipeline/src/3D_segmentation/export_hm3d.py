@@ -35,6 +35,7 @@ FALLBACK_LABELS = paths.fused_ids_clean
 # Outputs
 OUTPUT_GLB = paths.hm3d_glb
 OUTPUT_TXT = paths.hm3d_txt
+OUTPUT_SCN = paths.hm3d_scn
 # =================================================
 
 def id_to_color(obj_id: int) -> np.ndarray:
@@ -234,11 +235,16 @@ def main() -> None:
     print(f"Exporting {OUTPUT_TXT}...")
     with open(OUTPUT_TXT, 'w') as f:
         f.write("\n".join(txt_lines))
+    
+    print(f"Exporting {OUTPUT_SCN}...")
+    with open(OUTPUT_SCN, 'w') as f:
+        f.write("\n".join(txt_lines))
 
     print("Success! Pipeline Complete.")
     print("Files ready for Habitat:")
     print(f"  - {OUTPUT_GLB}")
     print(f"  - {OUTPUT_TXT}")
+    print(f"  - {OUTPUT_SCN}")
 
 if __name__ == "__main__":
     main()
