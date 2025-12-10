@@ -26,6 +26,8 @@ from dataclasses import dataclass
 import textwrap
 from openai import OpenAI
 
+from peft import PeftModel
+
 
 flags = sys.getdlopenflags()
 sys.setdlopenflags(flags | ctypes.RTLD_GLOBAL)
@@ -455,9 +457,9 @@ class NewViewer(BaseViewer):
         self.clusters_to_draw = clusters_to_draw
         # print(f"Updated clusters_to_draw: {self.clusters_to_draw}")  
 
-    def start_local_llm_navigation(self, user_input, model, tokenizer, output_q):
+    def start_local_llm_navigation(self, user_input, tokenizer, model_intent, output_q):
         try:
-            response = classify_user_intent_local(user_input, model, tokenizer)
+            response = classify_user_intent_local(user_input, model_intent, tokenizer)
             print("Response from Local LLM: ", response)
             if "start" not in response.lower():
                 # remove everything within < >
@@ -2046,7 +2048,7 @@ def classify_user_intent_local(user_input: str, model, tokenizer) -> str:
     return response
 
 
-def user_input_logic_loop(viewer: NewViewer, input_q: queue.Queue, output_q: queue.Queue, model=None, tokenizer=None):
+def user_input_logic_loop(viewer: NewViewer, input_q: queue.Queue, output_q: queue.Queue, model=None, tokenizer=None, model_intent=None):
     while True:
         try:
             user_input = input_q.get()
@@ -2054,13 +2056,13 @@ def user_input_logic_loop(viewer: NewViewer, input_q: queue.Queue, output_q: que
             if not user_input:
                 continue
 
-            local_llm_input = model is not None and tokenizer is not None  
+            local_llm_input = model is not None and tokenizer is not None and model_intent is not None
             # output_q.put("Processing your request...")
             if local_llm_input:
                 print("Using Local LLM for intent classification.")
                 # use the local model to parse the user input 
                 # if the user input is a navigation query, the output of the llm should be "navigation", otherwise the llm should return a friendly response
-                viewer.action_queue.put((viewer.start_local_llm_navigation, (user_input, model, tokenizer, output_q), {}))
+                viewer.action_queue.put((viewer.start_local_llm_navigation, (user_input, tokenizer, model_intent, output_q), {}))
                 
 
 
@@ -2129,12 +2131,13 @@ def user_input_logic_loop(viewer: NewViewer, input_q: queue.Queue, output_q: que
 
 _LOCAL_MODEL = None
 _LOCAL_TOKENIZER = None
+_LOCAL_MODEL_INTENT = None
 
-def load_local_model(repo_id="microsoft/Phi-3-mini-4k-instruct"):
-    global _LOCAL_MODEL, _LOCAL_TOKENIZER
+def load_local_model(repo_id="microsoft/Phi-3-mini-4k-instruct", fine_tuned_model=True):
+    global _LOCAL_MODEL, _LOCAL_TOKENIZER, _LOCAL_MODEL_INTENT
     if _LOCAL_MODEL is not None:
         print("[LOCAL-LLM] Model already loaded, reusing the cached instance.")
-        return _LOCAL_MODEL, _LOCAL_TOKENIZER
+        return _LOCAL_MODEL, _LOCAL_TOKENIZER, _LOCAL_MODEL_INTENT
 
     print("[INFO] Loading HF model (cached if present)...")
     print(f"[LOCAL-LLM] Loading model from HuggingFace repo: {repo_id}")
@@ -2142,14 +2145,34 @@ def load_local_model(repo_id="microsoft/Phi-3-mini-4k-instruct"):
     _LOCAL_TOKENIZER = AutoTokenizer.from_pretrained(repo_id)
 
     print("[LOCAL-LLM] Step 2/3: Loading model weights (this may take a while)...")
-    _LOCAL_MODEL = AutoModelForCausalLM.from_pretrained(
+    _LOCAL_MODEL_INTENT = AutoModelForCausalLM.from_pretrained(
         repo_id,
-        dtype=torch.float16,
+        load_in_4bit=fine_tuned_model,                   # <<< fondamentale
         device_map="auto",
-    )
+        torch_dtype="auto",
+        )
+    
+    if fine_tuned_model:
+        print("[LOCAL-LLM] Step 2b/3: USING FINE-TUNED MODEL WEIGHTS...")
+        _LOCAL_MODEL_ = AutoModelForCausalLM.from_pretrained(
+            repo_id,
+            load_in_4bit=True,                   # <<< fondamentale
+            device_map="auto",
+            torch_dtype="auto",
+            )
+
+        _LOCAL_MODEL = PeftModel.from_pretrained(
+            _LOCAL_MODEL_,
+            "../finetuning/phi3-mr-lora-fixed-v3",
+            device_map="auto"
+        )
+    else:
+        print("[LOCAL-LLM] Step 2b/3: USING BASE MODEL WEIGHTS...")
+        _LOCAL_MODEL = _LOCAL_MODEL_INTENT
+
     print(f"[LOCAL-LLM] Step 3/3: Model loaded successfully on device: {_LOCAL_MODEL.device}")
     print("[LOCAL-LLM] Ready for inference.")
-    return _LOCAL_MODEL, _LOCAL_TOKENIZER
+    return _LOCAL_MODEL, _LOCAL_TOKENIZER, _LOCAL_MODEL_INTENT
 
 if __name__ == "__main__":
     import argparse
@@ -2220,6 +2243,13 @@ if __name__ == "__main__":
         type=str,
         help="LLM backend to use: openai / local (default).",
     )
+    parser.add_argument(
+        "--finetuned-model",
+        default=True,
+        type=bool,
+        help="Whether to use the finetuned local model (if backend=local).",
+    )
+
 
     args = parser.parse_args()
 
@@ -2264,11 +2294,10 @@ if __name__ == "__main__":
 
     viewer = NewViewer(sim_settings, q_app=q_app)
 
-
     # * Depending on the backend flag, load the local model
     if args.backend.lower() == "local":
         try:
-            model, tokenizer = load_local_model()
+            model, tokenizer, model_intent = load_local_model(fine_tuned_model=args.finetuned_model)
             print("[mr_viewer.py main] Local model loaded and ready.")
         except Exception as e:
             print(f"[mr_viewer.py main] Error loading local model: {e}")
@@ -2277,7 +2306,7 @@ if __name__ == "__main__":
 
     logic_thread = threading.Thread(
         target=user_input_logic_loop,
-        args=(viewer, input_from_gui_q, output_to_gui_q, model, tokenizer),
+        args=(viewer, input_from_gui_q, output_to_gui_q, model, tokenizer, model_intent),
         daemon=True,
     )
     logic_thread.start()
