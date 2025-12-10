@@ -814,7 +814,7 @@ def generate_path_description(
         print("[generate_path_description] - Using Local LLM backend for description generation.")
         description = generate_description(prompt, model, tokenizer)
 
-    draw_all_clusters = True #! TODO set to false to visualize only clusters mentioned by the LLM
+    draw_all_clusters = False #! TODO set to false to visualize only clusters mentioned by the LLM
     if draw_all_clusters:
         clusters_to_draw_final = clusters_to_draw
     else:
