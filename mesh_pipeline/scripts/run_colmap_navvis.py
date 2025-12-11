@@ -5,7 +5,7 @@ Mapping (session images):
   - Feature extraction using intrinsics from sensors.txt.
   - Sequential matching across the capture order.
   - Incremental mapping + sparse model export (.ply).
-  - Vocabulary tree built for fast retrieval.
+  - Vocabulary tree built for fast retrieval (or reuse a pre-trained tree with --vocab-tree).
 
 Localization (query images in data/test_images by default):
   - Feature extraction on queries.
@@ -27,7 +27,7 @@ import shutil
 import subprocess
 import sys
 from pathlib import Path
-from typing import Dict, Iterable, List, Tuple
+from typing import Dict, Iterable, List, Optional, Tuple
 
 import yaml
 from tqdm import tqdm
@@ -146,11 +146,14 @@ def run_mapping(
     seq_overlap: int,
     use_gpu: bool,
     reset: bool,
-) -> Path:
+    vocab_tree_override: Optional[Path],
+    match_use_gpu: bool,
+    max_matches: int,
+) -> Tuple[Path, Path]:
     map_root = output_root / "map"
     sparse_dir = map_root / "sparse"
     model_dir = sparse_dir / "0"
-    vocab_tree_path = map_root / "vocab_tree.bin"
+    vocab_tree_path = map_root / "vocab_tree.bin" if vocab_tree_override is None else vocab_tree_override
     db_path = map_root / "database.db"
     image_list_out = map_root / "mapping_image_list.txt"
 
@@ -164,6 +167,11 @@ def run_mapping(
     logging.info("Resolved image root: %s", image_root)
     logging.info("Images to process: %d", len(resolved_names))
     logging.debug("First 5 images: %s", resolved_names[:5])
+    logging.info(
+        "Matching mode: %s, max matches: %d",
+        "GPU" if match_use_gpu else "CPU",
+        max_matches,
+    )
     _write_list(image_list_out, resolved_names)
 
     cameras = _parse_cameras(sensors_path)
@@ -209,16 +217,19 @@ def run_mapping(
     _run(feature_cmd)
 
     # Build a vocab tree so localization can use fast retrieval.
-    _run(
-        [
-            "colmap",
-            "vocab_tree_builder",
-            "--database_path",
-            str(db_path),
-            "--vocab_tree_path",
-            str(vocab_tree_path),
-        ]
-    )
+    if vocab_tree_override is None:
+        _run(
+            [
+                "colmap",
+                "vocab_tree_builder",
+                "--database_path",
+                str(db_path),
+                "--vocab_tree_path",
+                str(vocab_tree_path),
+            ]
+        )
+    else:
+        logging.info("Using pre-trained vocab tree: %s", vocab_tree_override)
 
     _run(
         [
@@ -231,9 +242,11 @@ def run_mapping(
             "--SiftMatching.num_threads",
             str(num_threads),
             "--SiftMatching.use_gpu",
-            "1" if use_gpu else "0",
+            "1" if match_use_gpu else "0",
             "--SiftMatching.guided_matching",
             "1",
+            "--SiftMatching.max_num_matches",
+            str(max_matches),
         ]
     )
 
@@ -244,7 +257,7 @@ def run_mapping(
             "--database_path",
             str(db_path),
             "--image_path",
-            str(session_dir),
+            str(image_root),
             "--output_path",
             str(sparse_dir),
             "--Mapper.num_threads",
@@ -271,7 +284,7 @@ def run_mapping(
     else:
         logging.warning("No model found at %s, mapper may have failed.", model_dir)
 
-    return model_dir
+    return model_dir, vocab_tree_path
 
 
 def run_localization(
@@ -284,6 +297,8 @@ def run_localization(
     vocab_neighbors: int,
     use_gpu: bool,
     reset: bool,
+    match_use_gpu: bool,
+    max_matches: int,
 ) -> Path:
     loc_root = output_root / "localization"
     loc_db = loc_root / "database.db"
@@ -301,6 +316,11 @@ def run_localization(
         raise FileNotFoundError(f"Query images folder missing: {query_dir}")
 
     shutil.copy(map_db_path, loc_db)
+    logging.info(
+        "Localization matching mode: %s, max matches: %d",
+        "GPU" if match_use_gpu else "CPU",
+        max_matches,
+    )
 
     _run(
         [
@@ -319,24 +339,48 @@ def run_localization(
         ]
     )
 
-    _run(
-        [
-            "colmap",
-            "vocab_tree_matcher",
-            "--database_path",
-            str(loc_db),
-            "--VocabTreeMatching.vocab_tree_path",
-            str(vocab_tree_path),
-            "--VocabTreeMatching.num_images",
-            str(vocab_neighbors),
-            "--SiftMatching.num_threads",
-            str(num_threads),
-            "--SiftMatching.use_gpu",
-            "1" if use_gpu else "0",
-            "--SiftMatching.guided_matching",
-            "1",
-        ]
-    )
+    def run_matcher(vt_path: Path) -> None:
+        _run(
+            [
+                "colmap",
+                "vocab_tree_matcher",
+                "--database_path",
+                str(loc_db),
+                "--VocabTreeMatching.vocab_tree_path",
+                str(vt_path),
+                "--VocabTreeMatching.num_images",
+                str(vocab_neighbors),
+                "--SiftMatching.num_threads",
+                str(num_threads),
+                "--SiftMatching.use_gpu",
+                "1" if match_use_gpu else "0",
+                "--SiftMatching.guided_matching",
+                "1",
+                "--SiftMatching.max_num_matches",
+                str(max_matches),
+            ]
+        )
+
+    try:
+        run_matcher(vocab_tree_path)
+    except subprocess.CalledProcessError:
+        fallback_tree = loc_root / "vocab_tree_auto.bin"
+        logging.warning(
+            "Failed to use vocab tree at %s (likely legacy FLANN format). Rebuilding a FAISS tree at %s.",
+            vocab_tree_path,
+            fallback_tree,
+        )
+        _run(
+            [
+                "colmap",
+                "vocab_tree_builder",
+                "--database_path",
+                str(loc_db),
+                "--vocab_tree_path",
+                str(fallback_tree),
+            ]
+        )
+        run_matcher(fallback_tree)
 
     _run(
         [
@@ -391,6 +435,23 @@ def parse_args() -> argparse.Namespace:
         default=80,
         help="Nearest neighbors per image for vocab_tree_matcher during localization.",
     )
+    parser.add_argument(
+        "--vocab-tree",
+        type=Path,
+        default=None,
+        help="Path to a pre-trained vocab tree (skips building a new one).",
+    )
+    parser.add_argument(
+        "--match-use-gpu",
+        action="store_true",
+        help="Use GPU for feature matching (may OOM on small GPUs). Default: CPU matching.",
+    )
+    parser.add_argument(
+        "--max-matches",
+        type=int,
+        default=8192,
+        help="SiftMatching.max_num_matches to limit GPU memory usage (default 8192).",
+    )
     parser.add_argument("--skip-map", action="store_true", help="Skip mapping stage.")
     parser.add_argument("--skip-localize", action="store_true", help="Skip localization stage.")
     parser.add_argument("--reset", action="store_true", help="Remove prior outputs before running.")
@@ -413,11 +474,11 @@ def main() -> None:
     args.output_root.mkdir(parents=True, exist_ok=True)
     map_root = args.output_root / "map"
     map_db = map_root / "database.db"
-    vocab_tree_path = map_root / "vocab_tree.bin"
+    vocab_tree_path = args.vocab_tree if args.vocab_tree else map_root / "vocab_tree.bin"
     model_dir = map_root / "sparse" / "0"
 
     if not args.skip_map:
-        model_dir = run_mapping(
+        model_dir, vocab_tree_path = run_mapping(
             session_dir=args.session_dir,
             image_list_path=args.image_list,
             sensors_path=args.sensors,
@@ -426,9 +487,13 @@ def main() -> None:
             seq_overlap=args.seq_overlap,
             use_gpu=args.use_gpu,
             reset=args.reset,
+            vocab_tree_override=args.vocab_tree,
+            match_use_gpu=args.match_use_gpu,
+            max_matches=args.max_matches,
         )
         map_db = args.output_root / "map" / "database.db"
-        vocab_tree_path = args.output_root / "map" / "vocab_tree.bin"
+    elif args.vocab_tree:
+        logging.info("Using supplied vocab tree for localization: %s", args.vocab_tree)
 
     if not args.skip_localize:
         run_localization(
@@ -441,6 +506,8 @@ def main() -> None:
             vocab_neighbors=args.vocab_neighbors,
             use_gpu=args.use_gpu,
             reset=args.reset,
+            match_use_gpu=args.match_use_gpu,
+            max_matches=args.max_matches,
         )
 
 
