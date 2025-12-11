@@ -135,43 +135,11 @@ class NewViewer(BaseViewer):
         self.clusters = self.cluster_objs(distance_thresh=0.5)
         self.rooms = self.get_rooms_from_sim()
 
-        self.save_semantic_image()
-
         print(self.sim.semantic_scene)
         print("Objects:", self.sim.semantic_scene.objects)
         print("Levels:", self.sim.semantic_scene.levels)
         print("Regions:", self.sim.semantic_scene.regions)
 
-
-        # self.print_scene_semantic_info()
-
-    def save_semantic_image(self) -> None:
-        observations = self.sim.get_sensor_observations()
-        rgb = observations.get("color_sensor", None)
-        semantic = observations.get("semantic_sensor", None)
-        # Diagnostic prints to help debug semantic observation format
-        if semantic is not None:
-            try:
-                import numpy as _np
-
-                print(f"[DIAG] semantic_obs: shape={getattr(semantic, 'shape', None)}, dtype={getattr(semantic, 'dtype', None)}")
-                if hasattr(semantic, 'shape'):
-                    s = semantic
-                    if getattr(s, 'ndim', None) == 2:
-                        print(f"[DIAG] semantic min/max: {_np.min(s)}, {_np.max(s)}; unique_count: {len(_np.unique(s))}")
-                    elif getattr(s, 'ndim', None) == 3:
-                        print(f"[DIAG] semantic 3-channel image; shape={s.shape}; sample pixels: {s.reshape(-1, s.shape[2])[:10]}")
-            except Exception:
-                pass
-
-        if rgb is not None:
-            if semantic is not None:
-                self.display_sample(rgb_obs=rgb, semantic_obs=semantic)
-            else:
-                self.display_sample(rgb_obs=rgb)
-            print("Semantic image saved in folder output.")
-        else:
-            print("No semantic sensor found in observations.")
 
     def get_semantic_info(self, file_path, map_room_id_to_name, ignore_categories=[]):
         semantic_info = {}
@@ -1769,9 +1737,10 @@ class NewViewer(BaseViewer):
         #############
         #! TODO remove
         if self.cnt % 200 == 0:
-            self.save_semantic_image()
+            # self.save_semantic_image()
             # print agent position every 200 frames
-            self.print_agent_state()
+            # self.print_agent_state()
+            pass
         self.cnt += 1
 
         #################
@@ -2361,6 +2330,7 @@ if __name__ == "__main__":
         "--dataset",
         # default dataset config: changed to local HG_E dataset to auto-load semantics
         default="data/scene_datasets/HG_E_mesh_06_12_2025/HG_E.scene_dataset_config.json",
+        # default="./data/scene_datasets/hm3d/hm3d_annotated_basis.scene_dataset_config.json",
         type=str,
         metavar="DATASET",
         help='dataset configuration file to use (default: "default")',
