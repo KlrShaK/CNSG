@@ -14,6 +14,7 @@ import string
 import sys
 import time
 from enum import Enum
+from turtle import position
 from typing import Any, Callable, Dict, List, Optional, Tuple
 import matplotlib.pyplot as plt
 from PIL import Image
@@ -482,7 +483,7 @@ class NewViewer(BaseViewer):
         self.clusters_to_draw = clusters_to_draw
         # print(f"Updated clusters_to_draw: {self.clusters_to_draw}")  
 
-    def start_local_llm_navigation(self, user_input, tokenizer, model_intent, output_q):
+    def start_local_llm_navigation(self, user_input, tokenizer, model_intent, output_q, user_pose=None):
         try:
             response = classify_user_intent_local(user_input, model_intent, tokenizer)
             print("Response from Local LLM: ", response)
@@ -511,9 +512,10 @@ class NewViewer(BaseViewer):
             output_q.put("Could not find the specified object or room. Please provide more details.")
             return
         
-        self.start_navigation(sim=self.sim, candidate_goals=checked_candidate_goals, user_input=user_input, output_q=output_q)
+        self.start_navigation(sim=self.sim, candidate_goals=checked_candidate_goals, user_input=user_input, output_q=output_q, user_pose=user_pose)
 
-    def start_navigation(self, sim, candidate_goals = [], user_input=None, output_q=None):
+    def start_navigation(self, sim, candidate_goals = [], user_input=None, output_q=None, user_pose=None):
+
         if len(candidate_goals) == 0:
             return
         if len(candidate_goals) == 1:
@@ -550,7 +552,7 @@ class NewViewer(BaseViewer):
 
         if goal_pos.y < 2.0:
             goal_pos.y = 0.163378  # Adjust height
-        frames = self.shortest_path(sim, goal_pos, target_name)
+        frames = self.shortest_path(sim, goal_pos, target_name, user_pose=user_pose)
 
         if len(frames) == 0: 
             # get the closest objects to the target object
@@ -562,7 +564,7 @@ class NewViewer(BaseViewer):
                 print(f"Trying nearby object {i+1}/{len(closest_positions)} at position {nearby_pos}")
                 if nearby_pos.y < 2.0:
                     nearby_pos.y = 0.163378  # Adjust height
-                frames = self.shortest_path(sim, nearby_pos, target_name)
+                frames = self.shortest_path(sim, nearby_pos, target_name, user_pose=user_pose)
                 if len(frames) > 0:
                     print(f"Found feasible path to nearby object {i+1}")
                     break
@@ -575,7 +577,7 @@ class NewViewer(BaseViewer):
                 return
             if goal_pos.y < 2.0:
                 goal_pos.y = 0.163378  # Adjust height
-            frames = self.shortest_path(sim, goal_pos, target_name)
+            frames = self.shortest_path(sim, goal_pos, target_name, user_pose=user_pose)
 
         if len(frames) == 0:
             print("No path frames generated, aborting navigation.")
@@ -628,14 +630,23 @@ class NewViewer(BaseViewer):
         return -1
 
 
-    def shortest_path(self, sim, goal: mn.Vector3, target_object: str = ""): 
+    def shortest_path(self, sim, goal: mn.Vector3, target_object: str = "", user_pose=None): 
         if not sim.pathfinder.is_loaded:
             print("Pathfinder not initialized, aborting.")
         else:
             seed = 4  # 4  # @param {type:"integer"}
             sim.pathfinder.seed(seed)
+            agent = sim.get_agent(self.agent_id)
+            agent_state = agent.get_state()
+            if user_pose is not None: #! TODO check if this works
+                position = user_pose['position'] #! TODO SHAURYA -> Check this format
+                rotation = user_pose['rotation'] #! TODO SHAURYA -> Check this format
+                agent_state.position = mn.Vector3(position[0], position[1], position[2])
+                agent_state.rotation = mn.Quaternion(rotation[0], rotation[1], rotation[2], rotation[3])
+                agent.set_state(agent_state)
+                
 
-            agent_state = sim.get_agent(self.agent_id).get_state()
+
             initial_agent_state_position = agent_state.position
             initial_agent_state_rotation = agent_state.rotation
 
@@ -2214,6 +2225,23 @@ def load_local_model(repo_id="microsoft/Phi-3-mini-4k-instruct", fine_tuned_mode
     print("[LOCAL-LLM] Ready for inference.")
     return _LOCAL_MODEL, _LOCAL_TOKENIZER, _LOCAL_MODEL_INTENT
 
+
+def localization(image: Image.Image):
+    """
+    Placeholder function for localization logic.
+    This function should implement the localization algorithm to determine the agent's position
+    based on the input image.
+    """
+    def get_position_from_image(img: Image.Image):
+        # Implement your localization algorithm here
+        return {"position": [0.0, 0.0, 0.0], "rotation": [0.0, 0.0, 0.0, 1.0]}  # Dummy position
+
+    print("[LOCALIZATION] Running localization algorithm...")
+    dummy_position = get_position_from_image(image)
+    # For now, just return a dummy position
+    print(f"[LOCALIZATION] Estimated position: {dummy_position}")
+    return dummy_position
+
 class NavigationServer:
     def __init__(self, viewer: NewViewer, model, tokenizer, model_intent):
         self.viewer = viewer
@@ -2277,6 +2305,15 @@ class NavigationServer:
             image.save(f"client_images/received_{timestamp}.jpg")
             print(f"[SERVER] Saved received image as 'client_images/received_{timestamp}.jpg'")
             print(f"[SERVER] Instruction: {instruction}")
+
+            # ! #####################
+            # ! NEED TO CALL LOCALIZATION SCRIPT (@SHAURYA)
+            # ! #####################
+            user_pose = localization(image)
+            print(f"[SERVER] Localized position: {user_pose}")
+
+
+            # ! #####################################
             
             # Esegui la pipeline di navigazione
             print("[SERVER] Starting navigation process...")
@@ -2285,7 +2322,7 @@ class NavigationServer:
             # Metti l'azione nella coda del viewer #! NOTE this works only for local llm -> fix to make it work for both local and openai
             self.viewer.action_queue.put((
                 self.viewer.start_local_llm_navigation,
-                (instruction, self.tokenizer, self.model_intent, result_queue),
+                (instruction, self.tokenizer, self.model_intent, result_queue, user_pose),
                 {}
             ))
             
