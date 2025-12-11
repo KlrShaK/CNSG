@@ -141,7 +141,6 @@ class NewViewer(BaseViewer):
         self.clusters = self.cluster_objs(distance_thresh=0.5)
         self.rooms = self.get_rooms_from_sim()
 
-        self.save_semantic_image()
 
         print(self.sim.semantic_scene)
         print("Objects:", self.sim.semantic_scene.objects)
@@ -151,33 +150,6 @@ class NewViewer(BaseViewer):
 
         # self.print_scene_semantic_info()
 
-    def save_semantic_image(self) -> None:
-        observations = self.sim.get_sensor_observations()
-        rgb = observations.get("color_sensor", None)
-        semantic = observations.get("semantic_sensor", None)
-        # Diagnostic prints to help debug semantic observation format
-        if semantic is not None:
-            try:
-                import numpy as _np
-
-                print(f"[DIAG] semantic_obs: shape={getattr(semantic, 'shape', None)}, dtype={getattr(semantic, 'dtype', None)}")
-                if hasattr(semantic, 'shape'):
-                    s = semantic
-                    if getattr(s, 'ndim', None) == 2:
-                        print(f"[DIAG] semantic min/max: {_np.min(s)}, {_np.max(s)}; unique_count: {len(_np.unique(s))}")
-                    elif getattr(s, 'ndim', None) == 3:
-                        print(f"[DIAG] semantic 3-channel image; shape={s.shape}; sample pixels: {s.reshape(-1, s.shape[2])[:10]}")
-            except Exception:
-                pass
-
-        if rgb is not None:
-            if semantic is not None:
-                self.display_sample(rgb_obs=rgb, semantic_obs=semantic)
-            else:
-                self.display_sample(rgb_obs=rgb)
-            print("Semantic image saved in folder output.")
-        else:
-            print("No semantic sensor found in observations.")
 
     def get_semantic_info(self, file_path, map_room_id_to_name, ignore_categories=[]):
         semantic_info = {}
@@ -1775,9 +1747,10 @@ class NewViewer(BaseViewer):
         #############
         #! TODO remove
         if self.cnt % 200 == 0:
-            self.save_semantic_image()
+            # self.save_semantic_image()
             # print agent position every 200 frames
-            self.print_agent_state()
+            # self.print_agent_state()
+            pass
         self.cnt += 1
 
         #################
@@ -2071,117 +2044,6 @@ def get_goal_from_response(response: str) -> object:
         raise ValueError(f"Unexpected rule number: {rule_number}")
 
 
-def check_scene_semantics(viewer: NewViewer) -> None:
-    """
-    Diagnostic helper to inspect the loaded simulation for semantic information.
-    Prints the state of `sim.semantic_scene`, agent sensors, and object OBBs.
-    Useful to detect why custom scenes produce semantic images full of zeros
-    and objects with zero-sized bounding boxes / centroid at origin.
-    """
-    sim = getattr(viewer, "sim", None)
-    print("\n[SEMANTIC DIAG] Starting semantic diagnostics...")
-    if sim is None:
-        print("[SEMANTIC DIAG] No simulator instance found on viewer.")
-        return
-
-    # 1) Semantic scene presence
-    semantic_scene = getattr(sim, "semantic_scene", None)
-    if semantic_scene is None:
-        print("[SEMANTIC DIAG] semantic_scene is None -> no semantic dataset loaded or parser failed.")
-    else:
-        try:
-            regions = getattr(semantic_scene, "regions", [])
-            objs = getattr(semantic_scene, "objects", [])
-            print(f"[SEMANTIC DIAG] semantic_scene: regions={len(regions)}, objects={len(objs)}")
-        except Exception as e:
-            print(f"[SEMANTIC DIAG] Error reading semantic_scene contents: {e}")
-
-    # 2) Agent sensors: check semantic sensor is present
-    try:
-        agent = sim.get_agent(getattr(viewer, "agent_id", 0))
-        sensor_suite = getattr(agent.scene_node, "node_sensor_suite", None)
-        has_semantic_sensor = False
-        suite_keys = []
-        if sensor_suite is not None:
-            try:
-                suite_keys = list(sensor_suite.keys()) if hasattr(sensor_suite, 'keys') else []
-            except Exception:
-                suite_keys = []
-            has_semantic_sensor = "semantic_sensor" in suite_keys or "semantic" in " ".join(suite_keys)
-            print(f"[SEMANTIC DIAG] Agent sensors: {suite_keys}")
-        else:
-            # fallback to internal simulator sensors
-            try:
-                agent_sensors = sim._Simulator__sensors[viewer.agent_id]
-                if isinstance(agent_sensors, dict):
-                    print(f"[SEMANTIC DIAG] Agent sensors (sim): {list(agent_sensors.keys())}")
-                    has_semantic_sensor = "semantic_sensor" in agent_sensors
-            except Exception:
-                print("[SEMANTIC DIAG] Could not read agent sensors via simulator internals.")
-
-        print(f"[SEMANTIC DIAG] semantic sensor present: {has_semantic_sensor}")
-    except Exception as e:
-        print(f"[SEMANTIC DIAG] Error while checking agent sensors: {e}")
-
-    # 3) Inspect semantic sensor rendering output (try a single observation if possible)
-    try:
-        if has_semantic_sensor:
-            obs = None
-            try:
-                obs = getattr(viewer, "latest_observations", None)
-            except Exception:
-                obs = None
-
-            if obs is None:
-                try:
-                    sim.step_world(1.0 / (getattr(viewer, "fps", 60)))
-                    obs = sim.get_sensor_observations() if hasattr(sim, "get_sensor_observations") else None
-                except Exception:
-                    obs = None
-
-            if obs is not None and "semantic_sensor" in obs:
-                semantic = obs["semantic_sensor"]
-                print(f"[SEMANTIC DIAG] Got semantic observation: shape={getattr(semantic, 'shape', None)}, dtype={getattr(semantic, 'dtype', None)}")
-                try:
-                    unique = np.unique(semantic)
-                    print(f"[SEMANTIC DIAG] semantic unique values (sample up to 10): {unique[:10]} (count {len(unique)})")
-                except Exception:
-                    pass
-            else:
-                print("[SEMANTIC DIAG] No semantic observation available to inspect.")
-    except Exception as e:
-        print(f"[SEMANTIC DIAG] Error while attempting to gather semantic observation: {e}")
-
-    # 4) Iterate semantic_scene objects (if present) and print OBB / category details
-    try:
-        if semantic_scene is not None:
-            for sim_obj in getattr(semantic_scene, "objects", [])[:200]:
-                try:
-                    obj_id = getattr(sim_obj, "id", None)
-                    cat = None
-                    if getattr(sim_obj, "category", None) is not None and hasattr(sim_obj.category, "name"):
-                        try:
-                            cat = sim_obj.category.name()
-                        except Exception:
-                            cat = str(sim_obj.category)
-
-                    obb = getattr(sim_obj, "obb", None)
-                    center = None
-                    half_extents = None
-                    if obb is not None:
-                        try:
-                            center = tuple(getattr(obb, "center", (0.0, 0.0, 0.0)))
-                            half_extents = tuple(getattr(obb, "half_extents", (0.0, 0.0, 0.0)))
-                        except Exception:
-                            center = None
-                    print(f"[SEMANTIC DIAG] Object ID: {obj_id}, Label: {cat}, Center: {center}, HalfExtents: {half_extents}")
-                except Exception as e:
-                    print(f"[SEMANTIC DIAG] Error reading object: {e}")
-    except Exception as e:
-        print(f"[SEMANTIC DIAG] Error iterating semantic_scene objects: {e}")
-
-    print("[SEMANTIC DIAG] Diagnostics complete. If objects show center=(0,0,0) and half_extents=(0,0,0) likely the GLB lacks instance/semantic attributes or the dataset config does not map semantic assets correctly.")
-
 def classify_user_intent_local(user_input: str, model, tokenizer) -> str:
     """
     Uses a local LLM to classify if the user input is a navigation query or conversational.
@@ -2452,7 +2314,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--scene",
         # default="./data/scene_datasets/hm3d/minival/00800-TEEsavR23oF/TEEsavR23oF.basis.glb",
-        default="./data/scene_datasets/HG_E_mesh_06_12_2025/HG_E.basis.glb",
+        default="./data/scene_datasets/HGE/HGE.basis.glb",
 
         type=str,
         help='scene/stage file to load (default: "./data/test_assets/scenes/simple_room.glb")',
@@ -2460,7 +2322,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--dataset",
         # default dataset config: changed to local HG_E dataset to auto-load semantics
-        default="data/scene_datasets/HG_E_mesh_06_12_2025/HG_E.scene_dataset_config.json",
+        default="data/scene_datasets/HGE/HGE.scene_dataset_config.json",
         type=str,
         metavar="DATASET",
         help='dataset configuration file to use (default: "default")',
@@ -2589,12 +2451,6 @@ if __name__ == "__main__":
         # Crea il viewer senza GUI
         viewer = NewViewer(sim_settings, q_app=None)
         
-        # Run diagnostics
-        try:
-            check_scene_semantics(viewer)
-        except Exception as e:
-            print(f"[SEMANTIC DIAG] Failed to run diagnostics: {e}")
-        
         # Crea e avvia il server
         server = NavigationServer(viewer, model, tokenizer, model_intent)
         
@@ -2627,11 +2483,7 @@ if __name__ == "__main__":
         gui_window.show()
 
         viewer = NewViewer(sim_settings, q_app=q_app)
-        
-        try:
-            check_scene_semantics(viewer)
-        except Exception as e:
-            print(f"[SEMANTIC DIAG] Failed to run diagnostics: {e}")
+
 
         logic_thread = threading.Thread(
             target=user_input_logic_loop,
