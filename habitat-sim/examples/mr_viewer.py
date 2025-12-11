@@ -2322,7 +2322,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--dataset",
         # default dataset config: changed to local HG_E dataset to auto-load semantics
-        default="data/scene_datasets/HGE/HGE.scene_dataset_config.json",
+        default="data/scene_datasets/HGE.scene_dataset_config.json",
         type=str,
         metavar="DATASET",
         help='dataset configuration file to use (default: "default")',
