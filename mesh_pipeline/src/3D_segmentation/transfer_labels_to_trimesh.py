@@ -32,7 +32,7 @@ from utils.config_utils import load_paths
 paths = load_paths()
 # Mesh + labels as seen by Open3D
 SRC_MESH_PATH   = paths.mesh_path                 # same mesh used in fuse_labels
-SRC_LABELS_PATH = paths.fused_ids_clean  # or paths.fused_ids, same length
+SRC_LABELS_PATH = paths.fused_ids  # or paths.fused_ids, same length
 
 # Mesh as seen by trimesh (the one export_hm3d.py will use)
 TGT_MESH_PATH   = paths.mesh_path                 # same file, but loaded via trimesh

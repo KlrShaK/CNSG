@@ -24,9 +24,9 @@ paths:
   trimesh_labels_filename: HG_E_cut_ids_trimesh.npy
 
   # Habitat export outputs
-  hm3d_glb_filename: HG_E.semantic.glb
-  hm3d_txt_filename: HG_E.semantic.txt
-  hm3d_scn_filename: HG_E.semantic.scn
+  hm3d_glb_filename: HGE.semantic.glb
+  hm3d_txt_filename: HGE.semantic.txt
+  hm3d_scn_filename: HGE.semantic.scn
 
   # Segmentation label metadata
   segmentation_config: config/segmentation_config.json

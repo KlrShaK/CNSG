@@ -33,9 +33,9 @@ OUTPUT_LABELS = paths.fused_ids_clean
 
 # 1. Geometric Clustering (Super-points)
 # Tuning for LARGE BUILDING (ETH HG):
-# EPS=0.20 (20cm): Groups distinct objects.
+# EPS=0.05 (5cm): Groups distinct objects.
 # Min_Samples=50: Ignores tiny mesh artifacts.
-CLUSTER_EPS = 0.20 
+CLUSTER_EPS = 0.05 
 MIN_CLUSTER_POINTS = 50 
 
 # 2. Smoothing

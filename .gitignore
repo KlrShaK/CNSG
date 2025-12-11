@@ -16,3 +16,4 @@ finetuning/raw_examples.txt
 
 mesh_pipeline/data/*
 mesh_pipeline/.vscode/*
+habitat-sim/semantic_captures/*
