@@ -10,8 +10,11 @@ import os
 import string
 import sys
 import time
+from datetime import datetime
 from enum import Enum
 from typing import Any, Callable, Dict, List, Optional, Tuple
+
+from PIL import Image
 
 flags = sys.getdlopenflags()
 sys.setdlopenflags(flags | ctypes.RTLD_GLOBAL)
@@ -268,6 +271,59 @@ class HabitatSimInteractiveViewer(Application):
                     )
             self.draw_region_debug(self.debug_line_render)
 
+    def save_semantic_image(self) -> None:
+        """
+        Captures the current semantic sensor view and saves it as a colored JPG file.
+        """
+        try:
+            # Get observations from the simulator
+            observations = self.sim.get_sensor_observations()
+
+            # Check if semantic sensor exists
+            if "semantic_sensor" not in observations:
+                logger.warning("No semantic sensor found in observations. Cannot save semantic image.")
+                return
+
+            semantic_obs = observations["semantic_sensor"]
+
+            # Create output directory if it doesn't exist
+            output_dir = "semantic_captures"
+            os.makedirs(output_dir, exist_ok=True)
+
+            # Generate filename with timestamp
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            filename = os.path.join(output_dir, f"semantic_{timestamp}.jpg")
+
+            # Convert semantic IDs to colored image
+            # Get unique semantic IDs
+            unique_ids = np.unique(semantic_obs)
+
+            # Create a colormap for semantic IDs
+            # Use a deterministic color mapping based on ID
+            semantic_img_rgb = np.zeros((semantic_obs.shape[0], semantic_obs.shape[1], 3), dtype=np.uint8)
+
+            for semantic_id in unique_ids:
+                # Generate a unique color for each semantic ID using a hash-like function
+                # This ensures consistent colors across saves
+                np.random.seed(int(semantic_id))
+                color = np.random.randint(0, 256, 3, dtype=np.uint8)
+
+                # Apply color to all pixels with this semantic ID
+                mask = semantic_obs == semantic_id
+                semantic_img_rgb[mask] = color
+
+            # Reset random seed to avoid affecting other random operations
+            np.random.seed(None)
+
+            # Save the image
+            Image.fromarray(semantic_img_rgb, mode='RGB').save(filename)
+            logger.info(f"✅ Saved colored semantic image to: {filename}")
+            print(f"✅ Saved colored semantic image to: {filename}")
+
+        except Exception as e:
+            logger.error(f"Failed to save semantic image: {e}")
+            print(f"❌ Failed to save semantic image: {e}")
+
     def draw_event(
         self,
         simulation_call: Optional[Callable] = None,
@@ -437,6 +493,15 @@ class HabitatSimInteractiveViewer(Application):
         Timer.start()
         self.step = -1
 
+        # --- Validation Print ---
+        if self.sim.semantic_scene:
+            print(f"✅ Semantic Scene Loaded Successfully")
+            print(f"   - Regions: {len(self.sim.semantic_scene.regions)}")
+            print(f"   - Objects: {len(self.sim.semantic_scene.objects)}")
+        else:
+            print(f"❌ WARNING: Semantic Scene is NULL. Check your dataset config.")
+        # ----------------------------------
+
     def render_batch(self):
         """
         This method updates the replay manager with the current state of environments and renders them.
@@ -512,6 +577,11 @@ class HabitatSimInteractiveViewer(Application):
             )
             # Toggle visualize semantic bboxes. Currently only regions supported
             self.semantic_region_debug_draw = not self.semantic_region_debug_draw
+
+        elif key == pressed.K:
+            # Save semantic sensor view as JPG
+            logger.info("Command: saving semantic sensor view")
+            self.save_semantic_image()
 
         elif key == pressed.TAB:
             # NOTE: (+ALT) - reconfigure without cycling scenes
@@ -1014,7 +1084,8 @@ Key Commands:
     ',':        Render a Bullet collision shape debug wireframe overlay (white=active, green=sleeping, blue=wants sleeping, red=can't sleep).
     'c':        Run a discrete collision detection pass and render a debug wireframe overlay showing active contact points and normals (yellow=fixed length normals, red=collision distances).
                 (+SHIFT) Toggle the contact point debug render overlay on/off.
-    'j'         Toggle Semantic visualization bounds (currently only Semantic Region annotations)
+    'j':        Toggle Semantic visualization bounds (currently only Semantic Region annotations)
+    'k':        Save current semantic sensor view as JPG image to 'semantic_captures/' directory
 
     Object Interactions:
     SPACE:      Toggle physics simulation on/off.
@@ -1227,6 +1298,8 @@ if __name__ == "__main__":
     sim_settings["window_height"] = args.height
     sim_settings["default_agent_navmesh"] = False
     sim_settings["enable_hbao"] = args.hbao
+    sim_settings["semantic_sensor"] = True
+    sim_settings["depth_sensor"] = True
 
     # start the application
     HabitatSimInteractiveViewer(sim_settings).exec()
