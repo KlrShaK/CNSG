@@ -5,6 +5,7 @@ output/
 # Prerequisites
 *.d
 
+client_images/
 # Compiled Object files
 *.slo
 *.lo
