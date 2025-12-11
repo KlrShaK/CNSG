@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
 
+# In another terminale, run: ngrok http 5000
+# ulimit -s unlimited
 # Copyright (c) Meta Platforms, Inc. and its affiliates.
 # This source code is licensed under the MIT license found in the
 # LICENSE file in the root directory of this source tree.
@@ -2219,7 +2221,7 @@ class NavigationServer:
         self.model_intent = model_intent
         
         self.app = Flask(__name__)
-        CORS(self.app)
+        CORS(self.app, resources={r"/*": {"origins": "*"}})  # Abilita CORS per tutte le origini
         
         # Registra gli endpoint
         self.app.route('/process', methods=['POST'])(self.process_request)
@@ -2269,12 +2271,17 @@ class NavigationServer:
             
             # Salva l'immagine (opzionale, per debug)
             timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+            if not os.path.exists("client_images"):
+                os.makedirs("client_images")
             image.save(f"client_images/received_{timestamp}.jpg")
+            print(f"[SERVER] Saved received image as 'client_images/received_{timestamp}.jpg'")
+            print(f"[SERVER] Instruction: {instruction}")
             
             # Esegui la pipeline di navigazione
+            print("[SERVER] Starting navigation process...")
             result_queue = queue.Queue()
             
-            # Metti l'azione nella coda del viewer
+            # Metti l'azione nella coda del viewer #! NOTE this works only for local llm -> fix to make it work for both local and openai
             self.viewer.action_queue.put((
                 self.viewer.start_local_llm_navigation,
                 (instruction, self.tokenizer, self.model_intent, result_queue),
@@ -2452,21 +2459,26 @@ if __name__ == "__main__":
         viewer = NewViewer(sim_settings, q_app=None)
         
         # Crea e avvia il server
+        print("[main] Initializing Navigation Server...")
         server = NavigationServer(viewer, model, tokenizer, model_intent)
         
-        # Avvia il viewer in un thread separato
-        def run_viewer():
-            viewer.exec()
+        # Avvia il server in un thread separato
+        print("[main] Starting server thread...")
+        def run_server():
+            server.run(host=args.server_host, port=args.server_port)
         
-        viewer_thread = threading.Thread(target=run_viewer, daemon=True)
-        viewer_thread.start()
-        
+        print("[main] Launching server thread...")
+        server_thread = threading.Thread(target=run_server, daemon=True)
+        print("[main] Server thread started.")
         # Avvia il server (bloccante)
         try:
-            server.run(host=args.server_host, port=args.server_port)
+            print("[main] Running server...")
+            server_thread.start()
         except KeyboardInterrupt:
-            print("\n[main] Server shutdown requested")
+            print("[main] Server shutdown requested")
             sys.exit(0)
+        
+        viewer.exec()
     else:
         print("[main] Starting in GUI mode")
         
