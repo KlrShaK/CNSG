@@ -62,6 +62,12 @@ from huggingface_hub import hf_hub_download
 from transformers import AutoModelForCausalLM, AutoTokenizer
 import torch
 
+# * Imports for WebApp functionalities
+from flask import Flask, request, jsonify
+from flask_cors import CORS
+import base64
+from io import BytesIO
+
 
 # Initialize OpenAI client
 try:
@@ -79,7 +85,7 @@ except Exception as e:
 class NewViewer(BaseViewer):
     MOVE, LOOK = 0.07, 1.5  # New definition for these two attributes
 
-    def __init__(self, sim_settings: Dict[str, Any], q_app: QApplication) -> None:
+    def __init__(self, sim_settings: Dict[str, Any], q_app: QApplication = None) -> None:
         scene_path = sim_settings["scene"]
         super().__init__(sim_settings)
         self.q_app = q_app
@@ -2343,6 +2349,100 @@ def load_local_model(repo_id="microsoft/Phi-3-mini-4k-instruct", fine_tuned_mode
     print("[LOCAL-LLM] Ready for inference.")
     return _LOCAL_MODEL, _LOCAL_TOKENIZER, _LOCAL_MODEL_INTENT
 
+class NavigationServer:
+    def __init__(self, viewer: NewViewer, model, tokenizer, model_intent):
+        self.viewer = viewer
+        self.model = model
+        self.tokenizer = tokenizer
+        self.model_intent = model_intent
+        
+        self.app = Flask(__name__)
+        CORS(self.app)
+        
+        # Registra gli endpoint
+        self.app.route('/process', methods=['POST'])(self.process_request)
+        self.app.route('/health', methods=['GET'])(self.health_check)
+    
+    def health_check(self):
+        """Endpoint per verificare che il server sia attivo"""
+        return jsonify({"status": "ok", "message": "Navigation server is running"})
+    
+    def process_request(self):
+        """
+        Gestisce le richieste POST con immagine e testo.
+        Formato atteso:
+        - FormData con 'image' (file) e 'instruction' (text)
+        OPPURE
+        - JSON con 'image' (base64) e 'instruction' (text)
+        """
+        try:
+            # Caso 1: FormData (come da webapp)
+            if 'image' in request.files:
+                image_file = request.files['image']
+                instruction = request.form.get('instruction', '')
+                
+                # Leggi l'immagine
+                image_bytes = image_file.read()
+                image = Image.open(BytesIO(image_bytes))
+                
+            # Caso 2: JSON con base64
+            elif request.is_json:
+                data = request.get_json()
+                image_b64 = data.get('image', '')
+                instruction = data.get('instruction', '')
+                
+                # Decodifica base64
+                if image_b64.startswith('data:image'):
+                    image_b64 = image_b64.split(',')[1]
+                image_bytes = base64.b64decode(image_b64)
+                image = Image.open(BytesIO(image_bytes))
+            else:
+                return jsonify({"error": "Invalid request format"}), 400
+            
+            if not instruction:
+                return jsonify({"error": "No instruction provided"}), 400
+            
+            print(f"[SERVER] Received request: '{instruction}'")
+            print(f"[SERVER] Image size: {image.size}")
+            
+            # Salva l'immagine (opzionale, per debug)
+            timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+            image.save(f"client_images/received_{timestamp}.jpg")
+            
+            # Esegui la pipeline di navigazione
+            result_queue = queue.Queue()
+            
+            # Metti l'azione nella coda del viewer
+            self.viewer.action_queue.put((
+                self.viewer.start_local_llm_navigation,
+                (instruction, self.tokenizer, self.model_intent, result_queue),
+                {}
+            ))
+            
+            # Attendi il risultato (con timeout)
+            try:
+                result = result_queue.get(timeout=60)  # 60 secondi di timeout
+                print(f"[SERVER] Navigation result: {result}")
+                
+                return jsonify({
+                    "status": "success",
+                    "result": result,
+                    "instruction": instruction
+                })
+            except queue.Empty:
+                return jsonify({"error": "Navigation timeout"}), 504
+                
+        except Exception as e:
+            print(f"[SERVER] Error processing request: {e}")
+            import traceback
+            traceback.print_exc()
+            return jsonify({"error": str(e)}), 500
+    
+    def run(self, host='0.0.0.0', port=5000):
+        """Avvia il server Flask"""
+        print(f"[SERVER] Starting navigation server on {host}:{port}")
+        self.app.run(host=host, port=port, threaded=True)
+
 if __name__ == "__main__":
     import argparse
 
@@ -2422,6 +2522,26 @@ if __name__ == "__main__":
         help="Whether to use the finetuned local model (if backend=local).",
     )
 
+    # * Parser arguments for WebApp functionalities
+    parser.add_argument(
+        "--server-mode",
+        action="store_true",
+        default=True,
+        help="Run as REST API server instead of GUI mode (default: False)",
+    )
+    parser.add_argument(
+        "--server-host",
+        default="0.0.0.0",
+        type=str,
+        help="Server host address (default: 0.0.0.0)",
+    )
+    parser.add_argument(
+        "--server-port",
+        default=5000,
+        type=int,
+        help="Server port (default: 5000)",
+    )
+
 
     args = parser.parse_args()
 
@@ -2453,24 +2573,6 @@ if __name__ == "__main__":
     input_from_gui_q = queue.Queue()
     output_to_gui_q = queue.Queue()
 
-    # 1. Crea la GUI di Tkinter nel thread principale
-    #    (ma non avviarla ancora con mainloop)
-    q_app = QApplication(sys.argv or [])
-    gui_window = create_gui(
-        input_from_gui_q,
-        output_to_gui_q,
-        window_width=args.width * 3 // 5,
-        window_height=args.height,
-    )
-    gui_window.show()
-
-    viewer = NewViewer(sim_settings, q_app=q_app)
-    # Run quick diagnostics to print semantic/OBB/sensor information for the loaded scene
-    try:
-        check_scene_semantics(viewer)
-    except Exception as e:
-        print(f"[SEMANTIC DIAG] Failed to run diagnostics: {e}")
-
     # * Depending on the backend flag, load the local model
     if args.backend.lower() == "local":
         try:
@@ -2480,14 +2582,63 @@ if __name__ == "__main__":
             print(f"[mr_viewer.py main] Error loading local model: {e}")
             sys.exit(1)
 
+    # * Depending on GUI or Server mode, start the appropriate logic
+    if args.server_mode:
+        print("[main] Starting in SERVER mode (no GUI)")
+        
+        # Crea il viewer senza GUI
+        viewer = NewViewer(sim_settings, q_app=None)
+        
+        # Run diagnostics
+        try:
+            check_scene_semantics(viewer)
+        except Exception as e:
+            print(f"[SEMANTIC DIAG] Failed to run diagnostics: {e}")
+        
+        # Crea e avvia il server
+        server = NavigationServer(viewer, model, tokenizer, model_intent)
+        
+        # Avvia il viewer in un thread separato
+        def run_viewer():
+            viewer.exec()
+        
+        viewer_thread = threading.Thread(target=run_viewer, daemon=True)
+        viewer_thread.start()
+        
+        # Avvia il server (bloccante)
+        try:
+            server.run(host=args.server_host, port=args.server_port)
+        except KeyboardInterrupt:
+            print("\n[main] Server shutdown requested")
+            sys.exit(0)
+    else:
+        print("[main] Starting in GUI mode")
+        
+        input_from_gui_q = queue.Queue()
+        output_to_gui_q = queue.Queue()
 
-    logic_thread = threading.Thread(
-        target=user_input_logic_loop,
-        args=(viewer, input_from_gui_q, output_to_gui_q, model, tokenizer, model_intent),
-        daemon=True,
-    )
-    logic_thread.start()
+        q_app = QApplication(sys.argv or [])
+        gui_window = create_gui(
+            input_from_gui_q,
+            output_to_gui_q,
+            window_width=args.width * 3 // 5,
+            window_height=args.height,
+        )
+        gui_window.show()
 
-    viewer.exec()
+        viewer = NewViewer(sim_settings, q_app=q_app)
+        
+        try:
+            check_scene_semantics(viewer)
+        except Exception as e:
+            print(f"[SEMANTIC DIAG] Failed to run diagnostics: {e}")
 
-    sys.exit(q_app.exec_())
+        logic_thread = threading.Thread(
+            target=user_input_logic_loop,
+            args=(viewer, input_from_gui_q, output_to_gui_q, model, tokenizer, model_intent),
+            daemon=True,
+        )
+        logic_thread.start()
+
+        viewer.exec()
+        sys.exit(q_app.exec_())
