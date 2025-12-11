@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 
-# In another terminale, run: ngrok http 5000
+# In another terminal, run: ngrok http 5000
 # ulimit -s unlimited
+
 # Copyright (c) Meta Platforms, Inc. and its affiliates.
 # This source code is licensed under the MIT license found in the
 # LICENSE file in the root directory of this source tree.
