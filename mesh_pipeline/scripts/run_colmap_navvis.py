@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import argparse
 import csv
+import logging
 import shutil
 import subprocess
 import sys
@@ -29,11 +30,12 @@ from pathlib import Path
 from typing import Dict, Iterable, List, Tuple
 
 import yaml
+from tqdm import tqdm
 
 
 def _run(cmd: List[str]) -> None:
-    """Print and run a shell command, raising on failure."""
-    print(f"[cmd] {' '.join(cmd)}")
+    """Log and run a shell command, raising on failure."""
+    logging.info("[cmd] %s", " ".join(cmd))
     subprocess.run(cmd, check=True)
 
 
@@ -64,7 +66,7 @@ def _load_defaults() -> Dict[str, Path]:
 def _load_image_names(image_list_path: Path) -> List[str]:
     names: List[str] = []
     with image_list_path.open("r", encoding="utf-8") as f:
-        for line in f:
+        for line in tqdm(f, desc="Reading image list", leave=False):
             line = line.strip()
             if not line or line.startswith("#"):
                 continue
@@ -159,12 +161,14 @@ def run_mapping(
 
     image_names = _load_image_names(image_list_path)
     image_root, resolved_names = _resolve_image_root(session_dir, image_names)
-    print(f"[info] Resolved image root: {image_root}")
+    logging.info("Resolved image root: %s", image_root)
+    logging.info("Images to process: %d", len(resolved_names))
+    logging.debug("First 5 images: %s", resolved_names[:5])
     _write_list(image_list_out, resolved_names)
 
     cameras = _parse_cameras(sensors_path)
     if not cameras:
-        print(f"[warn] No camera entries found in {sensors_path}, using COLMAP defaults.")
+        logging.warning("No camera entries found in %s, using COLMAP defaults.", sensors_path)
         camera_model = "PINHOLE"
         camera_params = None
     else:
@@ -172,6 +176,15 @@ def run_mapping(
         cam = cameras[sorted(cameras.keys())[0]]
         camera_model = str(cam["model"])
         camera_params = _fmt_params(cam["params"])
+        logging.info(
+            "Using camera model %s with intrinsics fx=%.3f, fy=%.3f, cx=%.3f, cy=%.3f",
+            camera_model,
+            cam["params"][0],
+            cam["params"][1],
+            cam["params"][2],
+            cam["params"][3],
+        )
+        logging.debug("Full camera record: %s", cam)
 
     feature_cmd = [
         "colmap",
@@ -256,7 +269,7 @@ def run_mapping(
             ]
         )
     else:
-        print(f"[warn] No model found at {model_dir}, mapper may have failed.")
+        logging.warning("No model found at %s, mapper may have failed.", model_dir)
 
     return model_dir
 
@@ -355,7 +368,7 @@ def run_localization(
             ]
         )
     else:
-        print(f"[warn] Localization output missing at {loc_model_dir}")
+        logging.warning("Localization output missing at %s", loc_model_dir)
 
     return loc_model_dir
 
@@ -370,7 +383,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--sensors", type=Path, default=defaults["sensors"])
     parser.add_argument("--query-dir", type=Path, default=defaults["query_dir"])
     parser.add_argument("--output-root", type=Path, default=defaults["output_root"])
-    parser.add_argument("--num-threads", type=int, default=8)
+    parser.add_argument("--num-threads", type=int, default=16)
     parser.add_argument("--seq-overlap", type=int, default=4, help="Sequential matcher overlap window.")
     parser.add_argument(
         "--vocab-neighbors",
@@ -387,9 +400,14 @@ def parse_args() -> argparse.Namespace:
 
 
 def main() -> None:
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s | %(levelname)s | %(message)s",
+    )
+
     args = parse_args()
     if not shutil.which("colmap"):
-        print("COLMAP binary not found in PATH.", file=sys.stderr)
+        logging.error("COLMAP binary not found in PATH.")
         sys.exit(1)
 
     args.output_root.mkdir(parents=True, exist_ok=True)
