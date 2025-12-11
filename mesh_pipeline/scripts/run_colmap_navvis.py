@@ -16,6 +16,11 @@ Run from the repository root, e.g.:
   python scripts/run_colmap_navvis.py
   python scripts/run_colmap_navvis.py --skip-map        # only localize into an existing map
   python scripts/run_colmap_navvis.py --skip-localize   # only build the map
+
+  python scripts/run_colmap_navvis.py \
+  --vocab-tree data/vocab_tree_flickr100K_words32K.bin \
+  --match-use-gpu --max-matches 16000
+
 """
 
 from __future__ import annotations
@@ -299,14 +304,13 @@ def run_localization(
     reset: bool,
     match_use_gpu: bool,
     max_matches: int,
-    vocab_words: int,
-    vocab_max_features: int,
 ) -> Path:
     loc_root = output_root / "localization"
     loc_db = loc_root / "database.db"
     loc_model_dir = loc_root / "registered"
     query_list_path = loc_root / "queries.txt"
     match_list_path = loc_root / "query_map_pairs.txt"
+    map_list_path = output_root / "map" / "mapping_image_list.txt"
 
     if reset and loc_root.exists():
         shutil.rmtree(loc_root)
@@ -318,6 +322,8 @@ def run_localization(
         raise FileNotFoundError(f"Vocab tree missing: {vocab_tree_path}")
     if not query_dir.exists():
         raise FileNotFoundError(f"Query images folder missing: {query_dir}")
+    if not map_list_path.exists():
+        raise FileNotFoundError(f"Mapping image list missing: {map_list_path}")
 
     shutil.copy(map_db_path, loc_db)
     logging.info(
@@ -326,9 +332,18 @@ def run_localization(
         max_matches,
     )
 
-    # Write query list for retrieval (filenames only, as stored by feature_extractor).
+    # Write query list (filenames only, as stored by feature_extractor).
     query_names = sorted([p.name for p in query_dir.iterdir() if p.is_file()])
     _write_list(query_list_path, query_names)
+
+    # Load map image names to build a query->map match list (limits matching).
+    with map_list_path.open("r", encoding="utf-8") as f:
+        map_image_names = [line.strip() for line in f if line.strip()]
+    pairs = []
+    for q in query_names:
+        for m in map_image_names:
+            pairs.append(f"{q} {m}")
+    _write_list(match_list_path, pairs)
 
     _run(
         [
@@ -347,63 +362,7 @@ def run_localization(
         ]
     )
 
-    # Retrieve top-N map neighbors per query to build a sparse match list.
     active_tree = vocab_tree_path
-    try:
-        _run(
-            [
-                "colmap",
-                "vocab_tree_retriever",
-                "--database_path",
-                str(loc_db),
-                "--vocab_tree_path",
-                str(active_tree),
-                "--query_image_list_path",
-                str(query_list_path),
-                "--match_list_path",
-                str(match_list_path),
-                "--VocabTreeMatching.num_images",
-                str(vocab_neighbors),
-            ]
-        )
-    except subprocess.CalledProcessError:
-        fallback_tree = loc_root / "vocab_tree_auto.bin"
-        logging.warning(
-            "Retriever failed with vocab tree %s (likely legacy). Rebuilding FAISS tree at %s.",
-            active_tree,
-            fallback_tree,
-        )
-        _run(
-            [
-                "colmap",
-                "vocab_tree_builder",
-                "--database_path",
-                str(loc_db),
-                "--vocab_tree_path",
-                str(fallback_tree),
-                "--VocabTree.num_visual_words",
-                str(vocab_words),
-                "--VocabTree.max_num_features",
-                str(vocab_max_features),
-            ]
-        )
-        active_tree = fallback_tree
-        _run(
-            [
-                "colmap",
-                "vocab_tree_retriever",
-                "--database_path",
-                str(loc_db),
-                "--vocab_tree_path",
-                str(active_tree),
-                "--query_image_list_path",
-                str(query_list_path),
-                "--match_list_path",
-                str(match_list_path),
-                "--VocabTreeMatching.num_images",
-                str(vocab_neighbors),
-            ]
-        )
 
     def run_matcher(vt_path: Path) -> None:
         _run(
@@ -445,10 +404,6 @@ def run_localization(
                     str(loc_db),
                     "--vocab_tree_path",
                     str(fallback_tree),
-                    "--VocabTree.num_visual_words",
-                    str(vocab_words),
-                    "--VocabTree.max_num_features",
-                    str(vocab_max_features),
                 ]
             )
             active_tree = fallback_tree
@@ -524,18 +479,6 @@ def parse_args() -> argparse.Namespace:
         default=8192,
         help="SiftMatching.max_num_matches to limit GPU memory usage (default 8192).",
     )
-    parser.add_argument(
-        "--vocab-tree-num-words",
-        type=int,
-        default=32768,
-        help="VocabTree.num_visual_words when rebuilding a vocab tree (smaller is faster).",
-    )
-    parser.add_argument(
-        "--vocab-tree-max-features",
-        type=int,
-        default=2_000_000,
-        help="VocabTree.max_num_features when rebuilding a vocab tree (caps descriptors for speed).",
-    )
     parser.add_argument("--skip-map", action="store_true", help="Skip mapping stage.")
     parser.add_argument("--skip-localize", action="store_true", help="Skip localization stage.")
     parser.add_argument("--reset", action="store_true", help="Remove prior outputs before running.")
@@ -592,8 +535,6 @@ def main() -> None:
             reset=args.reset,
             match_use_gpu=args.match_use_gpu,
             max_matches=args.max_matches,
-            vocab_words=args.vocab_tree_num_words,
-            vocab_max_features=args.vocab_tree_max_features,
         )
 
 
