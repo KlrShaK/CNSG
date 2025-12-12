@@ -68,8 +68,9 @@ def _load_defaults() -> Dict[str, Path]:
     }
 
 
-def _load_image_names(image_list_path: Path) -> List[str]:
-    names: List[str] = []
+def _load_image_entries(image_list_path: Path) -> List[Tuple[str, str]]:
+    """Return (sensor_id, image_path) entries, preserving order and removing duplicates."""
+    entries: List[Tuple[str, str]] = []
     with image_list_path.open("r", encoding="utf-8") as f:
         for line in tqdm(f, desc="Reading image list", leave=False):
             line = line.strip()
@@ -78,16 +79,17 @@ def _load_image_names(image_list_path: Path) -> List[str]:
             parts = [p.strip() for p in line.split(",")]
             if len(parts) < 3:
                 continue
-            names.append(parts[2])
-    # preserve order while removing duplicates
+            sensor_id, rel_path = parts[1], parts[2]
+            entries.append((sensor_id, rel_path))
+    # preserve order while removing duplicate paths
     seen = set()
-    unique_names = []
-    for name in names:
-        if name in seen:
+    unique_entries: List[Tuple[str, str]] = []
+    for sensor_id, rel_path in entries:
+        if rel_path in seen:
             continue
-        seen.add(name)
-        unique_names.append(name)
-    return unique_names
+        seen.add(rel_path)
+        unique_entries.append((sensor_id, rel_path))
+    return unique_entries
 
 
 def _parse_cameras(sensors_path: Path) -> Dict[str, Dict[str, object]]:
@@ -124,19 +126,21 @@ def _fmt_params(params: Iterable[float]) -> str:
     return ",".join(f"{p:.8f}".rstrip("0").rstrip(".") if "." in f"{p:.8f}" else f"{p:.8f}" for p in params)
 
 
-def _resolve_image_root(session_dir: Path, image_names: List[str]) -> Tuple[Path, List[str]]:
+def _resolve_image_root(session_dir: Path, entries: List[Tuple[str, str]]) -> Tuple[Path, List[Tuple[str, str]]]:
     """Find an image root so listed images exist; try session_dir and session_dir/raw_data."""
-    candidates = [(session_dir, image_names), (session_dir / "raw_data", image_names)]
+    names = [rel_path for _, rel_path in entries]
+    candidates = [(session_dir, names), (session_dir / "raw_data", names)]
 
     # Also try prefixing raw_data/ into the list if that matches the disk layout.
-    prefixed = [f"raw_data/{name}" for name in image_names]
+    prefixed = [f"raw_data/{name}" for name in names]
     candidates.append((session_dir, prefixed))
 
     first_missing = None
-    for root, names in candidates:
-        missing = [rel for rel in names if not (root / rel).exists()]
+    for root, cand_names in candidates:
+        missing = [rel for rel in cand_names if not (root / rel).exists()]
         if not missing:
-            return root, names
+            resolved = [(sensor_id, cand_names[i]) for i, (sensor_id, _) in enumerate(entries)]
+            return root, resolved
         if first_missing is None and missing:
             first_missing = root / missing[0]
     raise FileNotFoundError(f"Could not resolve image paths; first missing file: {first_missing}")
@@ -167,59 +171,76 @@ def run_mapping(
     map_root.mkdir(parents=True, exist_ok=True)
     sparse_dir.mkdir(parents=True, exist_ok=True)
 
-    image_names = _load_image_names(image_list_path)
-    image_root, resolved_names = _resolve_image_root(session_dir, image_names)
+    image_entries = _load_image_entries(image_list_path)
+    image_root, resolved_entries = _resolve_image_root(session_dir, image_entries)
     logging.info("Resolved image root: %s", image_root)
-    logging.info("Images to process: %d", len(resolved_names))
-    logging.debug("First 5 images: %s", resolved_names[:5])
+    logging.info("Images to process: %d", len(resolved_entries))
+    logging.debug("First 5 images: %s", [name for _, name in resolved_entries[:5]])
     logging.info(
         "Matching mode: %s, max matches: %d",
         "GPU" if match_use_gpu else "CPU",
         max_matches,
     )
-    _write_list(image_list_out, resolved_names)
+    _write_list(image_list_out, [name for _, name in resolved_entries])
 
     cameras = _parse_cameras(sensors_path)
     if not cameras:
-        logging.warning("No camera entries found in %s, using COLMAP defaults.", sensors_path)
-        camera_model = "PINHOLE"
-        camera_params = None
-    else:
-        # Use the first camera as representative (NavVis cameras share intrinsics).
-        cam = cameras[sorted(cameras.keys())[0]]
-        camera_model = str(cam["model"])
-        camera_params = _fmt_params(cam["params"])
-        logging.info(
-            "Using camera model %s with intrinsics fx=%.3f, fy=%.3f, cx=%.3f, cy=%.3f",
-            camera_model,
-            cam["params"][0],
-            cam["params"][1],
-            cam["params"][2],
-            cam["params"][3],
-        )
-        logging.debug("Full camera record: %s", cam)
+        logging.warning("No camera entries found in %s, using COLMAP defaults for all images.", sensors_path)
 
-    feature_cmd = [
-        "colmap",
-        "feature_extractor",
-        "--database_path",
-        str(db_path),
-        "--image_path",
-        str(image_root),
-        "--image_list_path",
-        str(image_list_out),
-        "--ImageReader.camera_model",
-        camera_model,
-        "--ImageReader.single_camera",
-        "1",
-        "--SiftExtraction.num_threads",
-        str(num_threads),
-        "--SiftExtraction.use_gpu",
-        "1" if use_gpu else "0",
-    ]
-    if camera_params:
-        feature_cmd += ["--ImageReader.camera_params", camera_params]
-    _run(feature_cmd)
+    images_by_sensor: Dict[str, List[str]] = {}
+    for sensor_id, rel_path in resolved_entries:
+        images_by_sensor.setdefault(sensor_id, []).append(rel_path)
+
+    for sensor_id, names in images_by_sensor.items():
+        cam = cameras.get(sensor_id)
+        if cam:
+            camera_model = str(cam["model"])
+            camera_params = _fmt_params(cam["params"])
+            logging.info(
+                "Using camera %s (%s) with intrinsics fx=%.3f, fy=%.3f, cx=%.3f, cy=%.3f for %d images",
+                sensor_id,
+                camera_model,
+                cam["params"][0],
+                cam["params"][1],
+                cam["params"][2],
+                cam["params"][3],
+                len(names),
+            )
+            logging.debug("Full camera record for %s: %s", sensor_id, cam)
+        else:
+            logging.warning(
+                "Camera %s not found in %s; using COLMAP defaults for its %d images.",
+                sensor_id,
+                sensors_path,
+                len(names),
+            )
+            camera_model = "PINHOLE"
+            camera_params = None
+
+        sensor_image_list = map_root / f"mapping_image_list_{sensor_id}.txt"
+        _write_list(sensor_image_list, names)
+
+        feature_cmd = [
+            "colmap",
+            "feature_extractor",
+            "--database_path",
+            str(db_path),
+            "--image_path",
+            str(image_root),
+            "--image_list_path",
+            str(sensor_image_list),
+            "--ImageReader.camera_model",
+            camera_model,
+            "--ImageReader.single_camera",
+            "1",
+            "--SiftExtraction.num_threads",
+            str(num_threads),
+            "--SiftExtraction.use_gpu",
+            "1" if use_gpu else "0",
+        ]
+        if camera_params:
+            feature_cmd += ["--ImageReader.camera_params", camera_params]
+        _run(feature_cmd)
 
     # Build a vocab tree so localization can use fast retrieval.
     if vocab_tree_override is None:
@@ -304,13 +325,13 @@ def run_localization(
     reset: bool,
     match_use_gpu: bool,
     max_matches: int,
+    query_camera_model: Optional[str],
+    query_camera_params: Optional[str],
 ) -> Path:
     loc_root = output_root / "localization"
     loc_db = loc_root / "database.db"
     loc_model_dir = loc_root / "registered"
     query_list_path = loc_root / "queries.txt"
-    match_list_path = loc_root / "query_map_pairs.txt"
-    map_list_path = output_root / "map" / "mapping_image_list.txt"
 
     if reset and loc_root.exists():
         shutil.rmtree(loc_root)
@@ -322,45 +343,39 @@ def run_localization(
         raise FileNotFoundError(f"Vocab tree missing: {vocab_tree_path}")
     if not query_dir.exists():
         raise FileNotFoundError(f"Query images folder missing: {query_dir}")
-    if not map_list_path.exists():
-        raise FileNotFoundError(f"Mapping image list missing: {map_list_path}")
 
     shutil.copy(map_db_path, loc_db)
     logging.info(
-        "Localization matching mode: %s, max matches: %d",
+        "Localization matching mode: %s, max matches: %d, vocab neighbors: %d",
         "GPU" if match_use_gpu else "CPU",
         max_matches,
+        vocab_neighbors,
     )
 
     # Write query list (filenames only, as stored by feature_extractor).
     query_names = sorted([p.name for p in query_dir.iterdir() if p.is_file()])
     _write_list(query_list_path, query_names)
 
-    # Load map image names to build a query->map match list (limits matching).
-    with map_list_path.open("r", encoding="utf-8") as f:
-        map_image_names = [line.strip() for line in f if line.strip()]
-    pairs = []
-    for q in query_names:
-        for m in map_image_names:
-            pairs.append(f"{q} {m}")
-    _write_list(match_list_path, pairs)
-
-    _run(
-        [
-            "colmap",
-            "feature_extractor",
-            "--database_path",
-            str(loc_db),
-            "--image_path",
-            str(query_dir),
-            "--ImageReader.camera_model",
-            "PINHOLE",
-            "--SiftExtraction.num_threads",
-            str(num_threads),
-            "--SiftExtraction.use_gpu",
-            "1" if use_gpu else "0",
-        ]
-    )
+    # Extract query features; optionally enforce a specific camera model/params.
+    feature_cmd = [
+        "colmap",
+        "feature_extractor",
+        "--database_path",
+        str(loc_db),
+        "--image_path",
+        str(query_dir),
+        "--image_list_path",
+        str(query_list_path),
+        "--SiftExtraction.num_threads",
+        str(num_threads),
+        "--SiftExtraction.use_gpu",
+        "1" if use_gpu else "0",
+    ]
+    if query_camera_model:
+        feature_cmd += ["--ImageReader.camera_model", query_camera_model]
+        if query_camera_params:
+            feature_cmd += ["--ImageReader.camera_params", query_camera_params]
+    _run(feature_cmd)
 
     active_tree = vocab_tree_path
 
@@ -373,8 +388,8 @@ def run_localization(
                 str(loc_db),
                 "--VocabTreeMatching.vocab_tree_path",
                 str(vt_path),
-                "--VocabTreeMatching.match_list_path",
-                str(match_list_path),
+                "--VocabTreeMatching.num_images",
+                str(vocab_neighbors),
                 "--SiftMatching.num_threads",
                 str(num_threads),
                 "--SiftMatching.use_gpu",
@@ -465,7 +480,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--vocab-tree",
         type=Path,
-        default=None,
+        default=r'data/vocab_tree_flickr100K_words32K.bin',
         help="Path to a pre-trained vocab tree (skips building a new one).",
     )
     parser.add_argument(
@@ -476,13 +491,25 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--max-matches",
         type=int,
-        default=8192,
+        default=20000, #25000
         help="SiftMatching.max_num_matches to limit GPU memory usage (default 8192).",
     )
     parser.add_argument("--skip-map", action="store_true", help="Skip mapping stage.")
     parser.add_argument("--skip-localize", action="store_true", help="Skip localization stage.")
     parser.add_argument("--reset", action="store_true", help="Remove prior outputs before running.")
     parser.add_argument("--cpu", dest="use_gpu", action="store_false", help="Disable GPU acceleration.")
+    parser.add_argument(
+        "--query-camera-model",
+        type=str,
+        default=None,
+        help="Optional camera model to override for query images (otherwise infer from EXIF/defaults).",
+    )
+    parser.add_argument(
+        "--query-camera-params",
+        type=str,
+        default=None,
+        help="Optional camera params to override for query images (comma-separated). Used only if query-camera-model is set.",
+    )
     parser.set_defaults(use_gpu=True)
     return parser.parse_args()
 
@@ -535,6 +562,8 @@ def main() -> None:
             reset=args.reset,
             match_use_gpu=args.match_use_gpu,
             max_matches=args.max_matches,
+            query_camera_model=args.query_camera_model,
+            query_camera_params=args.query_camera_params,
         )
 
 
