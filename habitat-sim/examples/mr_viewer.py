@@ -2424,7 +2424,7 @@ if __name__ == "__main__":
     )
     parser.add_argument(
         "--finetuned-model",
-        default=True,
+        default=False,
         type=bool,
         help="Whether to use the finetuned local model (if backend=local).",
     )
@@ -2433,7 +2433,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--server-mode",
         action="store_true",
-        default=True,
+        default=False,
         help="Run as REST API server instead of GUI mode (default: False)",
     )
     parser.add_argument(
