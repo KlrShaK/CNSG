@@ -77,7 +77,14 @@ GenericSemanticMeshData::buildSemanticMeshData(
   // initialize per-vertex color array
   Cr::Containers::Array<Mn::Color3ub> meshColors{Mn::NoInit, numVerts};
   // build color array from colors present in mesh
-  semanticMeshData->convertMeshColors(srcMeshData, convertToSRGB, meshColors);
+  // For vertex-color semantics we need exact byte matches with the SSD. Avoid
+  // sRGB conversion when an SSD with explicit colors is provided, otherwise the
+  // gamma transform can shift values enough to break color->ID matching.
+  bool convertColors = convertToSRGB;
+  if (semanticScene && semanticScene->hasVertColorsDefined()) {
+    convertColors = false;
+  }
+  semanticMeshData->convertMeshColors(srcMeshData, convertColors, meshColors);
 
   Cr::Utility::copy(meshColors,
                     Cr::Containers::arrayView(semanticMeshData->cpu_cbo_));
