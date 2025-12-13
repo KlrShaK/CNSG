@@ -1,5 +1,10 @@
 #!/usr/bin/env python3
-"""Headless NavVis HLoc pipeline: build SfM with HLoc (Option B) and localize queries."""
+"""Headless NavVis HLoc pipeline: build SfM with HLoc (Option B) and localize queries.
+
+
+python scripts/run_hloc_navvis.py --save-query-plot
+
+"""
 
 from __future__ import annotations
 
@@ -22,6 +27,7 @@ from hloc import extract_features, match_features, pairs_from_retrieval, reconst
 from hloc.localize_sfm import QueryLocalizer, pose_from_cluster  # type: ignore  # noqa
 from hloc.utils.io import write_poses  # type: ignore  # noqa
 from hloc.utils.parsers import parse_retrieval  # type: ignore  # noqa
+from hloc.utils import viz_3d  # type: ignore  # noqa
 import pycolmap  # type: ignore  # noqa
 
 LOGGER = logging.getLogger("hloc_navvis")
@@ -183,12 +189,23 @@ def run() -> None:
     parser.add_argument(
         "--output-root",
         type=Path,
+        # help="Defaults to <repo_root>/outputs/hloc/<session>",
         help="Defaults to <repo_root>/outputs/hloc/<session>",
     )
     parser.add_argument("--top-k-retrieval", type=int, default=20)
     parser.add_argument("--top-k-map", type=int, default=16)
     parser.add_argument("--seq-overlap", type=int, default=8)
     parser.add_argument("--ransac", type=float, default=12.0)
+    parser.add_argument(
+        "--save-query-plot",
+        action="store_true",
+        help="Save an HTML plot with only query poses visualized in the map.",
+    )
+    parser.add_argument(
+        "--query-plot-path",
+        type=Path,
+        help="Optional output path for the query pose plot (HTML).",
+    )
     args = parser.parse_args()
 
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
@@ -381,6 +398,7 @@ def run() -> None:
     fallback_cam = shared_camera
     results = {}
     loc_logs: Dict[str, dict] = {}
+    query_cameras: Dict[str, pycolmap.Camera] = {}
     for qname, refs in retrieval.items():
         db_ids = [db_name_to_id[n] for n in refs if n in db_name_to_id]
         if not db_ids:
@@ -398,10 +416,41 @@ def run() -> None:
         loc_logs[qname] = log
         if ret is not None:
             results[qname] = ret["cam_from_world"]
+            query_cameras[qname] = camera
     LOGGER.info("Localized %d/%d queries.", len(results), len(query_names))
 
     write_poses(results, loc_results_path, prepend_camera_name=False)
     _write_loc_logs(loc_results_path, loc_logs, retrieval, query_features_path, loc_matches_path)
+
+    # Print poses to stdout
+    if results:
+        print("Predicted poses (cam_from_world) for localized queries (wxyz | tx ty tz):")
+        for qname, pose in results.items():
+            qvec = pose.rotation.quat[[3, 0, 1, 2]]
+            tvec = pose.translation
+            print(
+                f"  {qname}: q=({qvec[0]:.6f}, {qvec[1]:.6f}, {qvec[2]:.6f}, {qvec[3]:.6f}), "
+                f"t=({tvec[0]:.3f}, {tvec[1]:.3f}, {tvec[2]:.3f})"
+            )
+
+    # Save a lightweight 3D plot with only query poses (no mapping cameras)
+    if results and args.save_query_plot:
+        plot_path = (
+            args.query_plot_path
+            if args.query_plot_path is not None
+            else paths["loc"] / "query_poses.html"
+        )
+        plot_path = plot_path if plot_path.is_absolute() else REPO_ROOT / plot_path
+        fig = viz_3d.init_figure(height=600)
+        viz_3d.plot_reconstruction(fig, model, max_reproj_error=10.0, cs=1.2, cameras=False)
+        for qname, pose in results.items():
+            cam = query_cameras.get(qname)
+            if cam is None:
+                continue
+            viz_3d.plot_camera_colmap(fig, pose, cam, name=f"query: {qname}")
+        plot_path.parent.mkdir(parents=True, exist_ok=True)
+        fig.write_html(plot_path)
+        LOGGER.info("Saved query-only pose plot to %s", plot_path)
 
 
 if __name__ == "__main__":
