@@ -324,6 +324,123 @@ class HabitatSimInteractiveViewer(Application):
             logger.error(f"Failed to save semantic image: {e}")
             print(f"❌ Failed to save semantic image: {e}")
 
+    def compute_object_center(self, obj_obb):
+        """
+        Compute the center of an object's oriented bounding box.
+        """
+        try:
+            # OBB in habitat-sim has a 'center' property
+            center = mn.Vector3(obj_obb.center)
+            return center
+        except Exception as e:
+            logger.warning(f"Could not compute object center: {e}")
+            return mn.Vector3(0, 0, 0)
+
+    def compute_object_bbox(self, obj_obb):
+        """
+        Compute axis-aligned bounding box from oriented bounding box.
+        Returns [[min_x, min_y, min_z], [max_x, max_y, max_z]]
+
+        The OBB has center, half_extents, and rotation. We compute the 8 corners
+        of the oriented box, then find the min/max to get an axis-aligned box.
+        """
+        try:
+            # Get OBB properties
+            center = mn.Vector3(obj_obb.center)
+            half_extents = mn.Vector3(obj_obb.half_extents)
+            rot_vec = mn.Vector4(obj_obb.rotation)
+            rotation = mn.Quaternion(
+                mn.Vector3(rot_vec[0], rot_vec[1], rot_vec[2]), rot_vec[3]
+            )
+
+            # Compute the 8 corners of the oriented bounding box
+            corner_offsets = [
+                mn.Vector3(-half_extents.x, -half_extents.y, -half_extents.z),
+                mn.Vector3(half_extents.x, -half_extents.y, -half_extents.z),
+                mn.Vector3(-half_extents.x, half_extents.y, -half_extents.z),
+                mn.Vector3(half_extents.x, half_extents.y, -half_extents.z),
+                mn.Vector3(-half_extents.x, -half_extents.y, half_extents.z),
+                mn.Vector3(half_extents.x, -half_extents.y, half_extents.z),
+                mn.Vector3(-half_extents.x, half_extents.y, half_extents.z),
+                mn.Vector3(half_extents.x, half_extents.y, half_extents.z),
+            ]
+
+            # Transform corners to world space
+            corners_world = [rotation.transform_vector(offset) + center for offset in corner_offsets]
+
+            # Compute axis-aligned bounding box from corners
+            bbox = [
+                [
+                    float(min(v.x for v in corners_world)),
+                    float(min(v.y for v in corners_world)),
+                    float(min(v.z for v in corners_world)),
+                ],
+                [
+                    float(max(v.x for v in corners_world)),
+                    float(max(v.y for v in corners_world)),
+                    float(max(v.z for v in corners_world)),
+                ],
+            ]
+            return bbox
+        except Exception as e:
+            logger.warning(f"Could not compute object bbox: {e}")
+            return [[0, 0, 0], [0, 0, 0]]
+
+    def print_semantic_objects_info(self) -> None:
+        """
+        Prints detailed information about all semantic objects in the scene.
+        This includes regions and their objects with bounding boxes.
+        Useful for validating that semantics have been loaded correctly.
+        """
+        print("\n" + "="*80)
+        print("SEMANTIC OBJECTS VALIDATION")
+        print("="*80)
+
+        scene = self.sim.semantic_scene
+
+        if scene is None:
+            print("❌ No semantic scene loaded!")
+            print("="*80 + "\n")
+            return
+
+        print(f"✅ Semantic Scene Loaded")
+        print(f"   Levels: {len(scene.levels)}")
+        print(f"   Regions: {len(scene.regions)}")
+        print(f"   Objects: {len(scene.objects)}")
+        print()
+
+        # Print information for each region
+        for region in scene.regions:
+            region_center = region.aabb.center if hasattr(region.aabb, 'center') else "N/A"
+            print(f"\n📍 Region ID: {region.id}")
+            print(f"   Category: {region.category.name() if region.category else 'Unknown'}")
+            print(f"   Center: {region_center}")
+            print(f"   Objects in region: {len(region.objects)}")
+
+            # Print information for each object in the region
+            for obj in region.objects:
+                obj_center = self.compute_object_center(obj.obb)
+                obj_bbox = self.compute_object_bbox(obj.obb)
+                category_name = obj.category.name() if obj.category else "Unknown"
+
+                print(f"      └─ Object ID: {obj.id}")
+                print(f"         Category: {category_name}")
+                print(f"         Center: [{obj_center.x:.3f}, {obj_center.y:.3f}, {obj_center.z:.3f}]")
+                print(f"         BBox Min: {obj_bbox[0]}")
+                print(f"         BBox Max: {obj_bbox[1]}")
+
+                # Calculate and print bbox dimensions
+                bbox_size = [
+                    obj_bbox[1][0] - obj_bbox[0][0],
+                    obj_bbox[1][1] - obj_bbox[0][1],
+                    obj_bbox[1][2] - obj_bbox[0][2]
+                ]
+                print(f"         Size (WxHxD): [{bbox_size[0]:.3f} x {bbox_size[1]:.3f} x {bbox_size[2]:.3f}] m")
+
+        print("\n" + "="*80)
+        print(f"Total: {len(scene.regions)} regions, {len(scene.objects)} objects")
+        print("="*80 + "\n")
+
     def draw_event(
         self,
         simulation_call: Optional[Callable] = None,
@@ -498,6 +615,25 @@ class HabitatSimInteractiveViewer(Application):
             print(f"✅ Semantic Scene Loaded Successfully")
             print(f"   - Regions: {len(self.sim.semantic_scene.regions)}")
             print(f"   - Objects: {len(self.sim.semantic_scene.objects)}")
+
+            # DEBUG: Check if any objects have non-zero bounding boxes
+            non_zero_bbox_count = 0
+            for obj in self.sim.semantic_scene.objects:
+                half_ext = obj.obb.half_extents
+                if half_ext.x > 0 or half_ext.y > 0 or half_ext.z > 0:
+                    non_zero_bbox_count += 1
+
+            print(f"   - Objects with non-zero BBoxes: {non_zero_bbox_count}/{len(self.sim.semantic_scene.objects)}")
+
+            if non_zero_bbox_count == 0:
+                print(f"\n   ⚠️  WARNING: ALL objects have zero-sized bounding boxes!")
+                print(f"   This means semantic mesh color matching FAILED.")
+                print(f"\n   Possible causes:")
+                print(f"      1. Colors in .semantic.glb don't exactly match .semantic.txt")
+                print(f"      2. Semantic mesh file not found/loaded")
+                print(f"      3. Habitat-sim needs recompiling after source changes")
+                print(f"      4. Semantic mesh has no vertex colors")
+                print(f"\n   Try pressing 'B' to see individual object details.\n")
         else:
             print(f"❌ WARNING: Semantic Scene is NULL. Check your dataset config.")
         # ----------------------------------
@@ -582,6 +718,11 @@ class HabitatSimInteractiveViewer(Application):
             # Save semantic sensor view as JPG
             logger.info("Command: saving semantic sensor view")
             self.save_semantic_image()
+
+        elif key == pressed.B:
+            # Print bounding boxes and object info for validation
+            logger.info("Command: printing semantic objects bounding boxes")
+            self.print_semantic_objects_info()
 
         elif key == pressed.TAB:
             # NOTE: (+ALT) - reconfigure without cycling scenes
@@ -1086,6 +1227,7 @@ Key Commands:
                 (+SHIFT) Toggle the contact point debug render overlay on/off.
     'j':        Toggle Semantic visualization bounds (currently only Semantic Region annotations)
     'k':        Save current semantic sensor view as JPG image to 'semantic_captures/' directory
+    'b':        Print detailed semantic objects info with bounding boxes (for validation)
 
     Object Interactions:
     SPACE:      Toggle physics simulation on/off.
