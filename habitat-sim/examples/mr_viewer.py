@@ -1,5 +1,8 @@
 #!/usr/bin/env python3
 
+# In another terminal, run: ngrok http 5000
+# ulimit -s unlimited
+
 # Copyright (c) Meta Platforms, Inc. and its affiliates.
 # This source code is licensed under the MIT license found in the
 # LICENSE file in the root directory of this source tree.
@@ -11,6 +14,7 @@ import string
 import sys
 import time
 from enum import Enum
+from turtle import position
 from typing import Any, Callable, Dict, List, Optional, Tuple
 import matplotlib.pyplot as plt
 from PIL import Image
@@ -62,6 +66,12 @@ from huggingface_hub import hf_hub_download
 from transformers import AutoModelForCausalLM, AutoTokenizer
 import torch
 
+# * Imports for WebApp functionalities
+from flask import Flask, request, jsonify
+from flask_cors import CORS
+import base64
+from io import BytesIO
+
 
 # Initialize OpenAI client
 try:
@@ -79,7 +89,7 @@ except Exception as e:
 class NewViewer(BaseViewer):
     MOVE, LOOK = 0.07, 1.5  # New definition for these two attributes
 
-    def __init__(self, sim_settings: Dict[str, Any], q_app: QApplication) -> None:
+    def __init__(self, sim_settings: Dict[str, Any], q_app: QApplication = None) -> None:
         scene_path = sim_settings["scene"]
         super().__init__(sim_settings)
         self.q_app = q_app
@@ -135,10 +145,14 @@ class NewViewer(BaseViewer):
         self.clusters = self.cluster_objs(distance_thresh=0.5)
         self.rooms = self.get_rooms_from_sim()
 
+
         print(self.sim.semantic_scene)
         print("Objects:", self.sim.semantic_scene.objects)
         print("Levels:", self.sim.semantic_scene.levels)
         print("Regions:", self.sim.semantic_scene.regions)
+
+
+        # self.print_scene_semantic_info()
 
 
     def get_semantic_info(self, file_path, map_room_id_to_name, ignore_categories=[]):
@@ -469,7 +483,7 @@ class NewViewer(BaseViewer):
         self.clusters_to_draw = clusters_to_draw
         # print(f"Updated clusters_to_draw: {self.clusters_to_draw}")  
 
-    def start_local_llm_navigation(self, user_input, tokenizer, model_intent, output_q):
+    def start_local_llm_navigation(self, user_input, tokenizer, model_intent, output_q, user_pose=None):
         try:
             response = classify_user_intent_local(user_input, model_intent, tokenizer)
             print("Response from Local LLM: ", response)
@@ -498,9 +512,10 @@ class NewViewer(BaseViewer):
             output_q.put("Could not find the specified object or room. Please provide more details.")
             return
         
-        self.start_navigation(sim=self.sim, candidate_goals=checked_candidate_goals, user_input=user_input, output_q=output_q)
+        self.start_navigation(sim=self.sim, candidate_goals=checked_candidate_goals, user_input=user_input, output_q=output_q, user_pose=user_pose)
 
-    def start_navigation(self, sim, candidate_goals = [], user_input=None, output_q=None):
+    def start_navigation(self, sim, candidate_goals = [], user_input=None, output_q=None, user_pose=None):
+
         if len(candidate_goals) == 0:
             return
         if len(candidate_goals) == 1:
@@ -537,7 +552,7 @@ class NewViewer(BaseViewer):
 
         if goal_pos.y < 2.0:
             goal_pos.y = 0.163378  # Adjust height
-        frames = self.shortest_path(sim, goal_pos, target_name)
+        frames = self.shortest_path(sim, goal_pos, target_name, user_pose=user_pose)
 
         if len(frames) == 0: 
             # get the closest objects to the target object
@@ -549,7 +564,7 @@ class NewViewer(BaseViewer):
                 print(f"Trying nearby object {i+1}/{len(closest_positions)} at position {nearby_pos}")
                 if nearby_pos.y < 2.0:
                     nearby_pos.y = 0.163378  # Adjust height
-                frames = self.shortest_path(sim, nearby_pos, target_name)
+                frames = self.shortest_path(sim, nearby_pos, target_name, user_pose=user_pose)
                 if len(frames) > 0:
                     print(f"Found feasible path to nearby object {i+1}")
                     break
@@ -562,7 +577,7 @@ class NewViewer(BaseViewer):
                 return
             if goal_pos.y < 2.0:
                 goal_pos.y = 0.163378  # Adjust height
-            frames = self.shortest_path(sim, goal_pos, target_name)
+            frames = self.shortest_path(sim, goal_pos, target_name, user_pose=user_pose)
 
         if len(frames) == 0:
             print("No path frames generated, aborting navigation.")
@@ -615,14 +630,23 @@ class NewViewer(BaseViewer):
         return -1
 
 
-    def shortest_path(self, sim, goal: mn.Vector3, target_object: str = ""): 
+    def shortest_path(self, sim, goal: mn.Vector3, target_object: str = "", user_pose=None): 
         if not sim.pathfinder.is_loaded:
             print("Pathfinder not initialized, aborting.")
         else:
             seed = 4  # 4  # @param {type:"integer"}
             sim.pathfinder.seed(seed)
+            agent = sim.get_agent(self.agent_id)
+            agent_state = agent.get_state()
+            if user_pose is not None: #! TODO check if this works
+                position = user_pose['position'] #! TODO SHAURYA -> Check this format
+                rotation = user_pose['rotation'] #! TODO SHAURYA -> Check this format
+                agent_state.position = mn.Vector3(position[0], position[1], position[2])
+                agent_state.rotation = mn.Quaternion(rotation[0], rotation[1], rotation[2], rotation[3])
+                agent.set_state(agent_state)
+                
 
-            agent_state = sim.get_agent(self.agent_id).get_state()
+
             initial_agent_state_position = agent_state.position
             initial_agent_state_rotation = agent_state.rotation
 
@@ -2034,117 +2058,6 @@ def get_goal_from_response(response: str) -> object:
         raise ValueError(f"Unexpected rule number: {rule_number}")
 
 
-def check_scene_semantics(viewer: NewViewer) -> None:
-    """
-    Diagnostic helper to inspect the loaded simulation for semantic information.
-    Prints the state of `sim.semantic_scene`, agent sensors, and object OBBs.
-    Useful to detect why custom scenes produce semantic images full of zeros
-    and objects with zero-sized bounding boxes / centroid at origin.
-    """
-    sim = getattr(viewer, "sim", None)
-    print("\n[SEMANTIC DIAG] Starting semantic diagnostics...")
-    if sim is None:
-        print("[SEMANTIC DIAG] No simulator instance found on viewer.")
-        return
-
-    # 1) Semantic scene presence
-    semantic_scene = getattr(sim, "semantic_scene", None)
-    if semantic_scene is None:
-        print("[SEMANTIC DIAG] semantic_scene is None -> no semantic dataset loaded or parser failed.")
-    else:
-        try:
-            regions = getattr(semantic_scene, "regions", [])
-            objs = getattr(semantic_scene, "objects", [])
-            print(f"[SEMANTIC DIAG] semantic_scene: regions={len(regions)}, objects={len(objs)}")
-        except Exception as e:
-            print(f"[SEMANTIC DIAG] Error reading semantic_scene contents: {e}")
-
-    # 2) Agent sensors: check semantic sensor is present
-    try:
-        agent = sim.get_agent(getattr(viewer, "agent_id", 0))
-        sensor_suite = getattr(agent.scene_node, "node_sensor_suite", None)
-        has_semantic_sensor = False
-        suite_keys = []
-        if sensor_suite is not None:
-            try:
-                suite_keys = list(sensor_suite.keys()) if hasattr(sensor_suite, 'keys') else []
-            except Exception:
-                suite_keys = []
-            has_semantic_sensor = "semantic_sensor" in suite_keys or "semantic" in " ".join(suite_keys)
-            print(f"[SEMANTIC DIAG] Agent sensors: {suite_keys}")
-        else:
-            # fallback to internal simulator sensors
-            try:
-                agent_sensors = sim._Simulator__sensors[viewer.agent_id]
-                if isinstance(agent_sensors, dict):
-                    print(f"[SEMANTIC DIAG] Agent sensors (sim): {list(agent_sensors.keys())}")
-                    has_semantic_sensor = "semantic_sensor" in agent_sensors
-            except Exception:
-                print("[SEMANTIC DIAG] Could not read agent sensors via simulator internals.")
-
-        print(f"[SEMANTIC DIAG] semantic sensor present: {has_semantic_sensor}")
-    except Exception as e:
-        print(f"[SEMANTIC DIAG] Error while checking agent sensors: {e}")
-
-    # 3) Inspect semantic sensor rendering output (try a single observation if possible)
-    try:
-        if has_semantic_sensor:
-            obs = None
-            try:
-                obs = getattr(viewer, "latest_observations", None)
-            except Exception:
-                obs = None
-
-            if obs is None:
-                try:
-                    sim.step_world(1.0 / (getattr(viewer, "fps", 60)))
-                    obs = sim.get_sensor_observations() if hasattr(sim, "get_sensor_observations") else None
-                except Exception:
-                    obs = None
-
-            if obs is not None and "semantic_sensor" in obs:
-                semantic = obs["semantic_sensor"]
-                print(f"[SEMANTIC DIAG] Got semantic observation: shape={getattr(semantic, 'shape', None)}, dtype={getattr(semantic, 'dtype', None)}")
-                try:
-                    unique = np.unique(semantic)
-                    print(f"[SEMANTIC DIAG] semantic unique values (sample up to 10): {unique[:10]} (count {len(unique)})")
-                except Exception:
-                    pass
-            else:
-                print("[SEMANTIC DIAG] No semantic observation available to inspect.")
-    except Exception as e:
-        print(f"[SEMANTIC DIAG] Error while attempting to gather semantic observation: {e}")
-
-    # 4) Iterate semantic_scene objects (if present) and print OBB / category details
-    try:
-        if semantic_scene is not None:
-            for sim_obj in getattr(semantic_scene, "objects", [])[:200]:
-                try:
-                    obj_id = getattr(sim_obj, "id", None)
-                    cat = None
-                    if getattr(sim_obj, "category", None) is not None and hasattr(sim_obj.category, "name"):
-                        try:
-                            cat = sim_obj.category.name()
-                        except Exception:
-                            cat = str(sim_obj.category)
-
-                    obb = getattr(sim_obj, "obb", None)
-                    center = None
-                    half_extents = None
-                    if obb is not None:
-                        try:
-                            center = tuple(getattr(obb, "center", (0.0, 0.0, 0.0)))
-                            half_extents = tuple(getattr(obb, "half_extents", (0.0, 0.0, 0.0)))
-                        except Exception:
-                            center = None
-                    print(f"[SEMANTIC DIAG] Object ID: {obj_id}, Label: {cat}, Center: {center}, HalfExtents: {half_extents}")
-                except Exception as e:
-                    print(f"[SEMANTIC DIAG] Error reading object: {e}")
-    except Exception as e:
-        print(f"[SEMANTIC DIAG] Error iterating semantic_scene objects: {e}")
-
-    print("[SEMANTIC DIAG] Diagnostics complete. If objects show center=(0,0,0) and half_extents=(0,0,0) likely the GLB lacks instance/semantic attributes or the dataset config does not map semantic assets correctly.")
-
 def classify_user_intent_local(user_input: str, model, tokenizer) -> str:
     """
     Uses a local LLM to classify if the user input is a navigation query or conversational.
@@ -2312,6 +2225,131 @@ def load_local_model(repo_id="microsoft/Phi-3-mini-4k-instruct", fine_tuned_mode
     print("[LOCAL-LLM] Ready for inference.")
     return _LOCAL_MODEL, _LOCAL_TOKENIZER, _LOCAL_MODEL_INTENT
 
+
+def localization(image: Image.Image):
+    """
+    Placeholder function for localization logic.
+    This function should implement the localization algorithm to determine the agent's position
+    based on the input image.
+    """
+    def get_position_from_image(img: Image.Image):
+        # Implement your localization algorithm here
+        return {"position": [0.0, 0.0, 0.0], "rotation": [0.0, 0.0, 0.0, 1.0]}  # Dummy position
+
+    print("[LOCALIZATION] Running localization algorithm...")
+    dummy_position = get_position_from_image(image)
+    # For now, just return a dummy position
+    print(f"[LOCALIZATION] Estimated position: {dummy_position}")
+    return dummy_position
+
+class NavigationServer:
+    def __init__(self, viewer: NewViewer, model, tokenizer, model_intent):
+        self.viewer = viewer
+        self.model = model
+        self.tokenizer = tokenizer
+        self.model_intent = model_intent
+        
+        self.app = Flask(__name__)
+        CORS(self.app, resources={r"/*": {"origins": "*"}})  # Abilita CORS per tutte le origini
+        
+        # Registra gli endpoint
+        self.app.route('/process', methods=['POST'])(self.process_request)
+        self.app.route('/health', methods=['GET'])(self.health_check)
+    
+    def health_check(self):
+        """Endpoint per verificare che il server sia attivo"""
+        return jsonify({"status": "ok", "message": "Navigation server is running"})
+    
+    def process_request(self):
+        """
+        Gestisce le richieste POST con immagine e testo.
+        Formato atteso:
+        - FormData con 'image' (file) e 'instruction' (text)
+        OPPURE
+        - JSON con 'image' (base64) e 'instruction' (text)
+        """
+        try:
+            # Caso 1: FormData (come da webapp)
+            if 'image' in request.files:
+                image_file = request.files['image']
+                instruction = request.form.get('instruction', '')
+                
+                # Leggi l'immagine
+                image_bytes = image_file.read()
+                image = Image.open(BytesIO(image_bytes))
+                
+            # Caso 2: JSON con base64
+            elif request.is_json:
+                data = request.get_json()
+                image_b64 = data.get('image', '')
+                instruction = data.get('instruction', '')
+                
+                # Decodifica base64
+                if image_b64.startswith('data:image'):
+                    image_b64 = image_b64.split(',')[1]
+                image_bytes = base64.b64decode(image_b64)
+                image = Image.open(BytesIO(image_bytes))
+            else:
+                return jsonify({"error": "Invalid request format"}), 400
+            
+            if not instruction:
+                return jsonify({"error": "No instruction provided"}), 400
+            
+            print(f"[SERVER] Received request: '{instruction}'")
+            print(f"[SERVER] Image size: {image.size}")
+            
+            # Salva l'immagine (opzionale, per debug)
+            timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+            if not os.path.exists("client_images"):
+                os.makedirs("client_images")
+            image.save(f"client_images/received_{timestamp}.jpg")
+            print(f"[SERVER] Saved received image as 'client_images/received_{timestamp}.jpg'")
+            print(f"[SERVER] Instruction: {instruction}")
+
+            # ! #####################
+            # ! NEED TO CALL LOCALIZATION SCRIPT (@SHAURYA)
+            # ! #####################
+            user_pose = localization(image)
+            print(f"[SERVER] Localized position: {user_pose}")
+
+
+            # ! #####################################
+            
+            # Esegui la pipeline di navigazione
+            print("[SERVER] Starting navigation process...")
+            result_queue = queue.Queue()
+            
+            # Metti l'azione nella coda del viewer #! NOTE this works only for local llm -> fix to make it work for both local and openai
+            self.viewer.action_queue.put((
+                self.viewer.start_local_llm_navigation,
+                (instruction, self.tokenizer, self.model_intent, result_queue, user_pose),
+                {}
+            ))
+            
+            # Attendi il risultato (con timeout)
+            try:
+                result = result_queue.get(timeout=60)  # 60 secondi di timeout
+                print(f"[SERVER] Navigation result: {result}")
+                
+                return jsonify({
+                    "status": "success",
+                    "result": result,
+                    "instruction": instruction
+                })
+            except queue.Empty:
+                return jsonify({"error": "Navigation timeout"}), 504
+                
+        except Exception as e:
+            print(f"[SERVER] Error processing request: {e}")
+            import traceback
+            traceback.print_exc()
+            return jsonify({"error": str(e)}), 500
+    
+    def run(self, host='0.0.0.0', port=5000):
+        """Avvia il server Flask"""
+        print(f"[SERVER] Starting navigation server on {host}:{port}")
+        self.app.run(host=host, port=port, threaded=True)
+
 if __name__ == "__main__":
     import argparse
 
@@ -2321,7 +2359,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--scene",
         # default="./data/scene_datasets/hm3d/minival/00800-TEEsavR23oF/TEEsavR23oF.basis.glb",
-        default="data/scene_datasets/HGE/HGE.basis.glb",
+        default="./data/scene_datasets/HGE/HGE.basis.glb",
 
         type=str,
         help='scene/stage file to load (default: "./data/test_assets/scenes/simple_room.glb")',
@@ -2330,7 +2368,6 @@ if __name__ == "__main__":
         "--dataset",
         # default dataset config: changed to local HG_E dataset to auto-load semantics
         default="data/scene_datasets/HGE.scene_dataset_config.json",
-        # default="./data/scene_datasets/hm3d/hm3d_annotated_basis.scene_dataset_config.json",
         type=str,
         metavar="DATASET",
         help='dataset configuration file to use (default: "default")',
@@ -2387,9 +2424,29 @@ if __name__ == "__main__":
     )
     parser.add_argument(
         "--finetuned-model",
-        default=True,
+        default=False,
         type=bool,
         help="Whether to use the finetuned local model (if backend=local).",
+    )
+
+    # * Parser arguments for WebApp functionalities
+    parser.add_argument(
+        "--server-mode",
+        action="store_true",
+        default=False,
+        help="Run as REST API server instead of GUI mode (default: False)",
+    )
+    parser.add_argument(
+        "--server-host",
+        default="0.0.0.0",
+        type=str,
+        help="Server host address (default: 0.0.0.0)",
+    )
+    parser.add_argument(
+        "--server-port",
+        default=5000,
+        type=int,
+        help="Server port (default: 5000)",
     )
 
 
@@ -2423,24 +2480,6 @@ if __name__ == "__main__":
     input_from_gui_q = queue.Queue()
     output_to_gui_q = queue.Queue()
 
-    # 1. Crea la GUI di Tkinter nel thread principale
-    #    (ma non avviarla ancora con mainloop)
-    q_app = QApplication(sys.argv or [])
-    gui_window = create_gui(
-        input_from_gui_q,
-        output_to_gui_q,
-        window_width=args.width * 3 // 5,
-        window_height=args.height,
-    )
-    gui_window.show()
-
-    viewer = NewViewer(sim_settings, q_app=q_app)
-    # Run quick diagnostics to print semantic/OBB/sensor information for the loaded scene
-    try:
-        check_scene_semantics(viewer)
-    except Exception as e:
-        print(f"[SEMANTIC DIAG] Failed to run diagnostics: {e}")
-
     # * Depending on the backend flag, load the local model
     if args.backend.lower() == "local":
         try:
@@ -2450,14 +2489,58 @@ if __name__ == "__main__":
             print(f"[mr_viewer.py main] Error loading local model: {e}")
             sys.exit(1)
 
+    # * Depending on GUI or Server mode, start the appropriate logic
+    if args.server_mode:
+        print("[main] Starting in SERVER mode (no GUI)")
+        
+        # Crea il viewer senza GUI
+        viewer = NewViewer(sim_settings, q_app=None)
+        
+        # Crea e avvia il server
+        print("[main] Initializing Navigation Server...")
+        server = NavigationServer(viewer, model, tokenizer, model_intent)
+        
+        # Avvia il server in un thread separato
+        print("[main] Starting server thread...")
+        def run_server():
+            server.run(host=args.server_host, port=args.server_port)
+        
+        print("[main] Launching server thread...")
+        server_thread = threading.Thread(target=run_server, daemon=True)
+        print("[main] Server thread started.")
+        # Avvia il server (bloccante)
+        try:
+            print("[main] Running server...")
+            server_thread.start()
+        except KeyboardInterrupt:
+            print("[main] Server shutdown requested")
+            sys.exit(0)
+        
+        viewer.exec()
+    else:
+        print("[main] Starting in GUI mode")
+        
+        input_from_gui_q = queue.Queue()
+        output_to_gui_q = queue.Queue()
 
-    logic_thread = threading.Thread(
-        target=user_input_logic_loop,
-        args=(viewer, input_from_gui_q, output_to_gui_q, model, tokenizer, model_intent),
-        daemon=True,
-    )
-    logic_thread.start()
+        q_app = QApplication(sys.argv or [])
+        gui_window = create_gui(
+            input_from_gui_q,
+            output_to_gui_q,
+            window_width=args.width * 3 // 5,
+            window_height=args.height,
+        )
+        gui_window.show()
 
-    viewer.exec()
+        viewer = NewViewer(sim_settings, q_app=q_app)
 
-    sys.exit(q_app.exec_())
+
+        logic_thread = threading.Thread(
+            target=user_input_logic_loop,
+            args=(viewer, input_from_gui_q, output_to_gui_q, model, tokenizer, model_intent),
+            daemon=True,
+        )
+        logic_thread.start()
+
+        viewer.exec()
+        sys.exit(q_app.exec_())
