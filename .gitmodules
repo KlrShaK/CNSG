@@ -7,3 +7,51 @@
 [submodule "mesh_pipeline/third_party/Hierarchical-Localization"]
 	path = mesh_pipeline/third_party/Hierarchical-Localization
 	url = https://github.com/cvg/Hierarchical-Localization
+[submodule "habitat-sim/src/deps/rapidjson"]
+	path = habitat-sim/src/deps/rapidjson
+	url = https://github.com/Tencent/rapidjson.git
+[submodule "habitat-sim/src/deps/magnum"]
+	path = habitat-sim/src/deps/magnum
+	url = https://github.com/mosra/magnum.git
+[submodule "habitat-sim/src/deps/corrade"]
+	path = habitat-sim/src/deps/corrade
+	url = https://github.com/mosra/corrade.git
+[submodule "habitat-sim/src/deps/magnum-plugins"]
+	path = habitat-sim/src/deps/magnum-plugins
+	url = https://github.com/mosra/magnum-plugins.git
+[submodule "habitat-sim/src/deps/pybind11"]
+	path = habitat-sim/src/deps/pybind11
+	url = https://github.com/pybind/pybind11.git
+[submodule "habitat-sim/src/deps/eigen"]
+	path = habitat-sim/src/deps/eigen
+	url = https://gitlab.com/libeigen/eigen.git
+[submodule "habitat-sim/src/deps/assimp"]
+	path = habitat-sim/src/deps/assimp
+	url = https://github.com/assimp/assimp
+[submodule "habitat-sim/src/deps/glfw"]
+	path = habitat-sim/src/deps/glfw
+	url = https://github.com/glfw/glfw
+[submodule "habitat-sim/src/deps/recastnavigation"]
+	path = habitat-sim/src/deps/recastnavigation
+	url = https://github.com/erikwijmans/recastnavigation.git
+[submodule "habitat-sim/src/deps/magnum-integration"]
+	path = habitat-sim/src/deps/magnum-integration
+	url = https://github.com/mosra/magnum-integration.git
+[submodule "habitat-sim/src/deps/magnum-bindings"]
+	path = habitat-sim/src/deps/magnum-bindings
+	url = https://github.com/mosra/magnum-bindings.git
+[submodule "habitat-sim/src/deps/tinyobjloader"]
+	path = habitat-sim/src/deps/tinyobjloader
+	url = https://github.com/syoyo/tinyobjloader.git
+[submodule "habitat-sim/src/deps/bullet3"]
+	path = habitat-sim/src/deps/bullet3
+	url = https://github.com/bulletphysics/bullet3
+[submodule "habitat-sim/src/deps/openexr"]
+	path = habitat-sim/src/deps/openexr
+	url = https://github.com/AcademySoftwareFoundation/openexr
+[submodule "habitat-sim/src/deps/rlr-audio-propagation"]
+	path = habitat-sim/src/deps/rlr-audio-propagation
+	url = https://github.com/facebookresearch/rlr-audio-propagation
+[submodule "habitat-sim/src/deps/zstd"]
+	path = habitat-sim/src/deps/zstd
+	url = https://github.com/facebook/zstd
