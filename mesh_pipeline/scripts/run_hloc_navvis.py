@@ -308,7 +308,11 @@ def run() -> None:
     image_options: Dict[str, object] = {}
     if shared_camera:
         camera_mode = pycolmap.CameraMode.SINGLE
-        image_options = {"camera_model": shared_camera["model"], "camera_params": shared_camera["params"]}
+        image_options = {
+            "camera_model": shared_camera["model"],
+            # pycolmap expects a comma-separated string for camera_params.
+            "camera_params": ",".join(str(p) for p in shared_camera["params"]),
+        }
     elif cameras:
         camera_mode = pycolmap.CameraMode.PER_IMAGE
 
