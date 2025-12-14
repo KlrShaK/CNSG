@@ -52,6 +52,58 @@ Underlying components (`src/3D_segmentation`):
 - `transfer_labels_to_trimesh.py` — align labels to trimesh vertex order.
 - `export_hm3d.py` — Habitat GLB + TXT semantic export.
 
+### Image localization
+
+Localize phone/camera images against the NavVis map using the LaMAR framework. The pipeline uses visual features (SuperPoint + SuperGlue) to match query images and estimate camera poses in NavVis coordinates.
+
+#### Prerequisites
+
+1. **Build LaMAR Docker image** (first time only):
+
+   ```bash
+   cd third_party/lamar-benchmark
+   docker build --target lamar -t lamar:lamar -f Dockerfile ./
+   ```
+
+#### Quick start
+
+```bash
+python src/localization/run_localization.py \
+    --query_image /path/to/your/photo.jpg
+```
+
+The script automatically:
+
+- Loads NavVis session from `config/paths.yml`
+- Validates paths and Docker image
+- Runs localization in Docker with proper volume mounts
+- Outputs camera pose to `outputs/localization/` (or custom `--output_dir`)
+
+#### Output format
+
+Camera pose saved as `poses.txt`:
+
+```
+# timestamp, sensor_id, qw, qx, qy, qz, tx, ty, tz
+1000000, camera, 0.707, 0.0, 0.707, 0.0, 10.5, 2.3, -5.1
+```
+
+Where:
+
+- `qw, qx, qy, qz` — Rotation quaternion (camera to world)
+- `tx, ty, tz` — Camera position in NavVis world coordinates (meters)
+
+#### Performance notes
+
+- **First run**: 2-4 hours to process map (features extracted and cached)
+- **Subsequent runs**: 1-2 minutes per query image (reuses cached features)
+
+Underlying components (`src/localization`):
+
+- `run_localization.py` — automated Docker runner with config integration.
+
+See `third_party/lamar-benchmark/LAMAR_USAGE_GUIDE.md` for advanced usage and troubleshooting.
+
 ## Configuration
 `config/paths.yml` centralizes dataset and asset paths (session name, point cloud, images, depth, meshes, exports) and is loaded via `src/utils/config_utils.py`. Adjust entries if your data lives elsewhere.
 
