@@ -9,3 +9,9 @@ numpy-quaternion
 pillow==10.4.0
 scipy>=1.10.1
 tqdm
+openai
+peft
+dotenv
+PySide6
+flask
+flask-cors
