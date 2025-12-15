@@ -640,12 +640,27 @@ class NewViewer(BaseViewer):
             sim.pathfinder.seed(seed)
             agent = sim.get_agent(self.agent_id)
             agent_state = agent.get_state()
-            if user_pose is not None: #! TODO check if this works
-                position = user_pose['position'] #! TODO SHAURYA -> Check this format
-                rotation = user_pose['rotation'] #! TODO SHAURYA -> Check this format
-                agent_state.position = mn.Vector3(position[0], position[1], position[2])
+            if user_pose is not None:
+                position = user_pose['position']
+                rotation = user_pose['rotation']
+
+                # Create a Vector3 from the localized position
+                localized_pos = mn.Vector3(position[0], position[1], position[2])
+
+                # Snap the position to the nearest navigable point on the ground
+                snapped_pos = sim.pathfinder.snap_point(localized_pos)
+
+                if snapped_pos is None:
+                    print(f"[WARNING] Could not snap position {localized_pos} to navigable mesh. Using original position.")
+                    snapped_pos = localized_pos
+                else:
+                    print(f"[INFO] Snapped position from {localized_pos} to {snapped_pos}")
+
+                # Set the agent to the snapped position on the ground
+                agent_state.position = snapped_pos
                 agent_state.rotation = mn.Quaternion(rotation[0], rotation[1], rotation[2], rotation[3])
                 agent.set_state(agent_state)
+                print(f"[INFO] Agent moved to localized position: {snapped_pos}")
                 
 
 
@@ -2368,6 +2383,12 @@ class NavigationServer:
         - JSON con 'image' (base64) e 'instruction' (text)
         """
         try:
+
+            # print the image_file and the instruction
+            # print(request.files['image'], "\n")
+            # print(request.form.get('instruction', ''))
+            # print(request.form.get('user_input', ''))
+            # print(request.form)
             # Caso 1: FormData (come da webapp)
             if 'image' in request.files:
                 image_file = request.files['image']
