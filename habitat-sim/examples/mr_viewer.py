@@ -24,6 +24,8 @@ import datetime
 import re
 import threading
 import queue
+import subprocess
+import tempfile
 
 from pathlib import Path
 from dataclasses import dataclass
@@ -2228,19 +2230,116 @@ def load_local_model(repo_id="microsoft/Phi-3-mini-4k-instruct", fine_tuned_mode
 
 def localization(image: Image.Image):
     """
-    Placeholder function for localization logic.
-    This function should implement the localization algorithm to determine the agent's position
-    based on the input image.
-    """
-    def get_position_from_image(img: Image.Image):
-        # Implement your localization algorithm here
-        return {"position": [0.0, 0.0, 0.0], "rotation": [0.0, 0.0, 0.0, 1.0]}  # Dummy position
+    Localization function that uses the LaMAR-based localization pipeline.
 
-    print("[LOCALIZATION] Running localization algorithm...")
-    dummy_position = get_position_from_image(image)
-    # For now, just return a dummy position
-    print(f"[LOCALIZATION] Estimated position: {dummy_position}")
-    return dummy_position
+    This function:
+    1. Saves the image to a temporary file
+    2. Calls the localization script at mesh_pipeline/scripts/run_localization_pipeline.sh
+    3. Reads the resulting pose from poses.txt
+    4. Returns the pose in the format expected by the navigation system
+
+    Returns:
+        dict: Dictionary with 'position' [x, y, z] and 'rotation' [qw, qx, qy, qz]
+    """
+    print("[LOCALIZATION] Running localization pipeline...")
+
+    # Get the project root (go up from habitat-sim/examples to CNSG)
+    script_dir = Path(__file__).resolve().parent
+    project_root = script_dir.parent.parent  # Up two levels: habitat-sim/examples -> habitat-sim -> CNSG
+    localization_script = project_root / "mesh_pipeline" / "scripts" / "run_localization_pipeline.sh"
+    lamar_repo = project_root / "mesh_pipeline" / "third_party" / "lamar-benchmark"
+
+    # Validate paths
+    if not localization_script.exists():
+        raise FileNotFoundError(f"Localization script not found: {localization_script}")
+
+    # Save image to temporary file
+    with tempfile.NamedTemporaryFile(suffix='.jpg', delete=False, mode='wb') as tmp_file:
+        image.save(tmp_file.name, format='JPEG')
+        query_image_path = tmp_file.name
+        print(f"[LOCALIZATION] Saved query image to: {query_image_path}")
+
+    try:
+        # Run the localization pipeline
+        print(f"[LOCALIZATION] Running localization script: {localization_script}")
+        result = subprocess.run(
+            [str(localization_script), "--query-image", query_image_path],
+            cwd=str(project_root),
+            capture_output=True,
+            text=True,
+            check=False
+        )
+
+        if result.returncode != 0:
+            print(f"[LOCALIZATION] Error running localization script:")
+            print(f"[LOCALIZATION] stdout: {result.stdout}")
+            print(f"[LOCALIZATION] stderr: {result.stderr}")
+            raise RuntimeError(f"Localization script failed with exit code {result.returncode}")
+
+        print(f"[LOCALIZATION] Localization script completed successfully")
+
+        # Find and read the poses.txt file
+        # Expected path: lamar-benchmark/outputs/pose_estimation/query_single/map/superpoint/superglue/netvlad-10/triangulation/single_image/poses.txt
+        poses_file = lamar_repo / "outputs" / "pose_estimation" / "query_single" / "map" / "superpoint" / "superglue" / "netvlad-10" / "triangulation" / "single_image" / "poses.txt"
+
+        # If not found at expected location, search for it
+        if not poses_file.exists():
+            print(f"[LOCALIZATION] Poses file not found at expected location: {poses_file}")
+            print(f"[LOCALIZATION] Searching for poses.txt in outputs directory...")
+
+            outputs_dir = lamar_repo / "outputs"
+            if outputs_dir.exists():
+                found_poses = list(outputs_dir.rglob("poses.txt"))
+                if found_poses:
+                    poses_file = found_poses[0]
+                    print(f"[LOCALIZATION] Found poses.txt at: {poses_file}")
+                else:
+                    raise FileNotFoundError(f"Could not find poses.txt in {outputs_dir}")
+            else:
+                raise FileNotFoundError(f"Outputs directory does not exist: {outputs_dir}")
+
+        # Parse the poses.txt file
+        print(f"[LOCALIZATION] Reading poses from: {poses_file}")
+        with open(poses_file, 'r') as f:
+            lines = f.readlines()
+
+        # Find the first valid pose line (skip comments and empty lines)
+        pose_data = None
+        for line in lines:
+            line = line.strip()
+            if not line or line.startswith('#'):
+                continue
+
+            # Parse the pose: timestamp, sensor_id, qw, qx, qy, qz, tx, ty, tz, ...
+            parts = [p.strip() for p in line.split(',')]
+            if len(parts) >= 9:
+                try:
+                    qw, qx, qy, qz = map(float, parts[2:6])
+                    tx, ty, tz = map(float, parts[6:9])
+                    pose_data = {
+                        'position': [tx, ty, tz],
+                        'rotation': [qw, qx, qy, qz]
+                    }
+                    break
+                except ValueError:
+                    continue
+
+        if pose_data is None:
+            raise RuntimeError(f"Could not parse valid pose from: {poses_file}")
+
+        print(f"[LOCALIZATION] Successfully localized!")
+        print(f"[LOCALIZATION] Position: {pose_data['position']}")
+        print(f"[LOCALIZATION] Rotation (quaternion): {pose_data['rotation']}")
+
+        return pose_data
+
+    finally:
+        # Clean up temporary file
+        try:
+            os.unlink(query_image_path)
+            print(f"[LOCALIZATION] Cleaned up temporary file: {query_image_path}")
+        except Exception as e:
+            print(f"[LOCALIZATION] Warning: Could not delete temporary file {query_image_path}: {e}")
 
 class NavigationServer:
     def __init__(self, viewer: NewViewer, model, tokenizer, model_intent):
