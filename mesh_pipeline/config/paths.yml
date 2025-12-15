@@ -1,7 +1,7 @@
 paths:
   # Root folder where all datasets and outputs live
   data_root: data
-  outputs_root: outputs
+  outputs_root: third_party/lamar-benchmark/outputs
 
   # Session folder downloaded by scripts/download_data.sh
   session_name: navvis_2022-02-06_12.55.11

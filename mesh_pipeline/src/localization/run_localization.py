@@ -63,10 +63,10 @@ def build_docker_command(
         # Docker image
         docker_image,
         # Python script and arguments
-        "python", "pipelines/localize_single_image.py",
+        "python", "localize_single_image.py",
         "--map_path", str(map_session_path),
         "--query_image", str(query_image_path.absolute()),
-        "--output_dir", str(output_dir.absolute())
+        "--output_dir", "./outputs",
     ]
 
     return docker_cmd
