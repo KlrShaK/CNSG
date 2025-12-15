@@ -1,6 +1,7 @@
 paths:
   # Root folder where all datasets and outputs live
   data_root: data
+  outputs_root: outputs
 
   # Session folder downloaded by scripts/download_data.sh
   session_name: navvis_2022-02-06_12.55.11
@@ -13,15 +14,16 @@ paths:
   trajectories_file: trajectories.txt
   images_file: images.txt
   sensors_file: sensors.txt
+  global_alignment_file: proc/alignment_global.txt
 
   # Mesh and label assets stored alongside the data root
-  poisson_mesh_filename: HG_E_poisson.ply
-  mesh_filename: HG_E_cut.voxelized.ply
-  fused_mesh_filename: HG_E_semantic.ply
-  fused_ids_filename: HG_E_semantic_ids.npy
-  fused_mesh_clean_filename: HG_E_semantic_clean.ply
-  fused_ids_clean_filename: HG_E_semantic_ids_clean.npy
-  trimesh_labels_filename: HG_E_cut_ids_trimesh.npy
+  poisson_mesh_filename: HGE_poisson.ply
+  mesh_filename: HGE_cut.voxelized.ply
+  fused_mesh_filename: HGE_semantic.ply
+  fused_ids_filename: HGE_semantic_ids.npy
+  fused_mesh_clean_filename: HGE_semantic_clean.ply
+  fused_ids_clean_filename: HGE_semantic_ids_clean.npy
+  trimesh_labels_filename: HGE_cut_ids_trimesh.npy
 
   # Habitat export outputs
   hm3d_glb_filename: HGE.semantic.glb

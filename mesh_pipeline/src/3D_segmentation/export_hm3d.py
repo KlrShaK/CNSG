@@ -14,6 +14,7 @@ from typing import Dict, List
 import numpy as np
 import trimesh
 import json
+import struct
 import sys
 from pathlib import Path
 

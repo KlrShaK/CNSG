@@ -36,6 +36,19 @@ fi
 echo "Downloading Google Drive folder into $DATA_DIR ..."
 gdown --folder --id "$GDRIVE_FOLDER_ID" --output "$DATA_DIR"
 
+# Handle localization.zip if it exists
+LOCALIZATION_ZIP="$(find "$DATA_DIR" -maxdepth 2 -type f -name "localization.zip" | head -n 1 || true)"
+
+if [[ -n "$LOCALIZATION_ZIP" && -f "$LOCALIZATION_ZIP" ]]; then
+  echo "Found localization.zip: $LOCALIZATION_ZIP"
+  echo "Unzipping to $ROOT_DIR ..."
+  unzip -o "$LOCALIZATION_ZIP" -d "$ROOT_DIR"
+  echo "Localization outputs extracted to $ROOT_DIR/outputs"
+  rm -f "$LOCALIZATION_ZIP"
+else
+  echo "No localization.zip found. Skipping localization outputs."
+fi
+
 # Handle additional processed data zip (depth_maps + semantic_masks)
 SESSION_DIR="$DATA_DIR/navvis_2022-02-06_12.55.11"
 ADDITIONAL_ZIP="$(find "$DATA_DIR" -maxdepth 2 -type f -name "additional_data_navvis_2022-02-06_12.55.11.zip" | head -n 1 || true)"

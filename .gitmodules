@@ -4,9 +4,6 @@
 [submodule "mesh_pipeline/third_party/OpenYOLO3D"]
 	path = mesh_pipeline/third_party/OpenYOLO3D
 	url = https://github.com/rzninvo/OpenYOLO3D.git
-[submodule "mesh_pipeline/third_party/Hierarchical-Localization"]
-	path = mesh_pipeline/third_party/Hierarchical-Localization
-	url = https://github.com/cvg/Hierarchical-Localization
 [submodule "habitat-sim/src/deps/rapidjson"]
 	path = habitat-sim/src/deps/rapidjson
 	url = https://github.com/Tencent/rapidjson.git

@@ -106,7 +106,7 @@ def run_localization(query_image: Path, output_dir: Path = None):
 
     # Set default output directory if not provided
     if output_dir is None:
-        output_dir = repo_root / "outputs" / "localization"
+        output_dir = paths.outputs_root
     output_dir.mkdir(exist_ok=True, parents=True)
 
     # Check if Docker image exists

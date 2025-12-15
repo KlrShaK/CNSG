@@ -40,7 +40,7 @@ run_poisson() {
 
 run_voxelize() {
   echo "Running voxelization..."
-  python3 "$ROOT_DIR/src/mesh_generation/habitat_mesh_reduce.py" \
+  python3 "$ROOT_DIR/src/mesh_generation/simplify_mesh.py" \
     --input "$POISSON_OUT" \
     --output "$VOXEL_OUT" \
     --save_voxel_mesh

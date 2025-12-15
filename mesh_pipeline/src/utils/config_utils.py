@@ -22,6 +22,7 @@ def _resolve_path(value: str, base: Path) -> Path:
 class SegmentationPaths:
     root: Path
     data_root: Path
+    outputs_root: Path
     session_dir: Path
     raw_images_dir: Path
     raw_pointcloud: Path
@@ -30,6 +31,7 @@ class SegmentationPaths:
     trajectories_file: Path
     images_file: Path
     sensors_file: Path
+    global_alignment_file: Path
     poisson_mesh: Path
     mesh_path: Path
     fused_mesh: Path
@@ -54,6 +56,7 @@ def load_paths(config_path: Path = CONFIG_PATH) -> SegmentationPaths:
 
     repo_root = Path(__file__).resolve().parents[2]
     data_root = _resolve_path(paths_cfg.get("data_root", "data"), repo_root)
+    outputs_root = _resolve_path(paths_cfg.get("outputs_root", "outputs"), repo_root)
 
     session_name = paths_cfg.get("session_name")
     if not session_name:
@@ -89,33 +92,37 @@ def load_paths(config_path: Path = CONFIG_PATH) -> SegmentationPaths:
         paths_cfg.get("sensors_file", "sensors.txt"),
         session_dir,
     )
+    global_alignment_file = _resolve_path(
+        paths_cfg.get("global_alignment_file", "proc/alignment_global.txt"),
+        session_dir,
+    )
 
     poisson_mesh = _resolve_path(
         paths_cfg.get(
             "poisson_mesh_filename",
-            paths_cfg.get("mesh_filename", "HG_E_poisson.ply"),
+            paths_cfg.get("mesh_filename", "HGE_poisson.ply"),
         ),
         data_root,
     )
-    mesh_path = _resolve_path(paths_cfg.get("mesh_filename", "HG_E_cut.voxelized.ply"), data_root)
-    fused_mesh = _resolve_path(paths_cfg.get("fused_mesh_filename", "HG_E_semantic.ply"), data_root)
-    fused_ids = _resolve_path(paths_cfg.get("fused_ids_filename", "HG_E_semantic_ids.npy"), data_root)
+    mesh_path = _resolve_path(paths_cfg.get("mesh_filename", "HGE_cut.voxelized.ply"), data_root)
+    fused_mesh = _resolve_path(paths_cfg.get("fused_mesh_filename", "HGE_semantic.ply"), data_root)
+    fused_ids = _resolve_path(paths_cfg.get("fused_ids_filename", "HGE_semantic_ids.npy"), data_root)
     fused_mesh_clean = _resolve_path(
-        paths_cfg.get("fused_mesh_clean_filename", "HG_E_semantic_clean.ply"),
+        paths_cfg.get("fused_mesh_clean_filename", "HGE_semantic_clean.ply"),
         data_root,
     )
     fused_ids_clean = _resolve_path(
-        paths_cfg.get("fused_ids_clean_filename", "HG_E_semantic_ids_clean.npy"),
+        paths_cfg.get("fused_ids_clean_filename", "HGE_semantic_ids_clean.npy"),
         data_root,
     )
     trimesh_labels = _resolve_path(
-        paths_cfg.get("trimesh_labels_filename", "HG_E_cut_ids_trimesh.npy"),
+        paths_cfg.get("trimesh_labels_filename", "HGE_cut_ids_trimesh.npy"),
         data_root,
     )
 
-    hm3d_glb = _resolve_path(paths_cfg.get("hm3d_glb_filename", "HG_E.semantic.glb"), data_root)
-    hm3d_txt = _resolve_path(paths_cfg.get("hm3d_txt_filename", "HG_E.semantic.txt"), data_root)
-    hm3d_scn = _resolve_path(paths_cfg.get("hm3d_scn_filename", "HG_E.semantic.scn"), data_root)
+    hm3d_glb = _resolve_path(paths_cfg.get("hm3d_glb_filename", "HGE.semantic.glb"), data_root)
+    hm3d_txt = _resolve_path(paths_cfg.get("hm3d_txt_filename", "HGE.semantic.txt"), data_root)
+    hm3d_scn = _resolve_path(paths_cfg.get("hm3d_scn_filename", "HGE.semantic.scn"), data_root)
     segmentation_config = _resolve_path(
         paths_cfg.get("segmentation_config", "config/segmentation_config.json"),
         repo_root,
@@ -124,6 +131,7 @@ def load_paths(config_path: Path = CONFIG_PATH) -> SegmentationPaths:
     return SegmentationPaths(
         root=repo_root,
         data_root=data_root,
+        outputs_root=outputs_root,
         session_dir=session_dir,
         raw_images_dir=raw_images_dir,
         raw_pointcloud=raw_pointcloud,
@@ -132,6 +140,7 @@ def load_paths(config_path: Path = CONFIG_PATH) -> SegmentationPaths:
         trajectories_file=trajectories_file,
         images_file=images_file,
         sensors_file=sensors_file,
+        global_alignment_file=global_alignment_file,
         poisson_mesh=poisson_mesh,
         mesh_path=mesh_path,
         fused_mesh=fused_mesh,

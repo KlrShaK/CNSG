@@ -5,15 +5,22 @@ CLI entrypoint for running Poisson surface reconstruction on a point cloud.
 Workflow:
 1) Load a PLY point cloud.
 2) Run Poisson reconstruction with optional density trimming and simplification.
-3) Save the reconstructed mesh (and optionally a simplified mesh).
+3) Apply global alignment transformation to mesh.
+4) Save the reconstructed mesh (and optionally a simplified mesh).
 """
 
 import argparse
 import logging
 from pathlib import Path
+import sys
 import open3d as o3d
 
 from poisson_meshing_module import mesh_from_pointcloud
+
+# Add repo root to path to import config utils and alignment functions
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+from src.utils.config_utils import load_paths
+from src.utils.apply_global_alignment import read_alignment_pose_line
 
 
 def setup_logging(logfile: Path | None = None, verbose: bool = True) -> logging.Logger:
@@ -86,6 +93,29 @@ def main(args: argparse.Namespace) -> None:
     logger.info(f"       Triangles: {len(mesh.triangles):,}")
 
     # -------------------------------------------------------
+    # Apply global alignment transformation
+    # -------------------------------------------------------
+    logger.info("[INFO] Applying global alignment transformation...")
+
+    # Get alignment file path from config or use provided path
+    if args.alignment_file is not None:
+        alignment_path = args.alignment_file
+    else:
+        paths = load_paths()
+        alignment_path = paths.global_alignment_file
+
+    # Read and apply transformation
+    T_s2w = read_alignment_pose_line(alignment_path, label=args.alignment_label)
+    logger.info(f"[INFO] Read alignment from: {alignment_path} (label={args.alignment_label})")
+
+    mesh.transform(T_s2w)
+    logger.info("[INFO] Global alignment applied to mesh")
+
+    if simplified is not None:
+        simplified.transform(T_s2w)
+        logger.info("[INFO] Global alignment applied to simplified mesh")
+
+    # -------------------------------------------------------
     # Save mesh
     # -------------------------------------------------------
     logger.info("[INFO] Saving output mesh...")
@@ -127,6 +157,12 @@ if __name__ == "__main__":
 
     parser.add_argument("--simplify_error", type=float, default=1e-8,
                         help="Max error for quadric decimation")
+
+    parser.add_argument("--alignment-file", type=Path, default=None,
+                        help="Optional explicit alignment_global.txt path. If omitted, uses config paths.yml")
+
+    parser.add_argument("--alignment-label", type=str, default="pose_graph_optimized",
+                        help="Which label to read from alignment_global.txt (default: pose_graph_optimized)")
 
     parser.add_argument("--log", type=Path, default=None,
                         help="Optional log file to save logs")
