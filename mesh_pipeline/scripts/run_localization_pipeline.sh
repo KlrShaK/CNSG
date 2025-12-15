@@ -107,7 +107,7 @@ if [[ "${VISUALIZE}" == true ]]; then
     # Construct path to poses.txt
     # LaMAR saves to: outputs/pose_estimation/query_single/map/superpoint/superglue/netvlad-10/triangulation/single_image/poses.txt
     LAMAR_REPO="${PROJECT_ROOT}/mesh_pipeline/third_party/lamar-benchmark"
-    POSES_FILE="${PROJECT_ROOT}/mesh_pipeline/outputs/pose_estimation/query_single/map/superpoint/superglue/netvlad-10/triangulation/single_image/poses.txt"
+    POSES_FILE="${LAMAR_REPO}/outputs/pose_estimation/query_single/map/superpoint/superglue/netvlad-10/triangulation/single_image/poses.txt"
 
     if [[ ! -f "${POSES_FILE}" ]]; then
         echo "Warning: Poses file not found at expected location:"
@@ -116,7 +116,7 @@ if [[ "${VISUALIZE}" == true ]]; then
         echo "Searching for poses.txt in outputs directory..."
 
         # Try to find poses.txt in the outputs
-        FOUND_POSES=$(find "${PROJECT_ROOT}/mesh_pipeline/outputs" -name "poses.txt" -type f 2>/dev/null | head -1)
+        FOUND_POSES=$(find "${LAMAR_REPO}/outputs" -name "poses.txt" -type f 2>/dev/null | head -1)
 
         if [[ -z "${FOUND_POSES}" ]]; then
             echo "Error: Could not find poses.txt in outputs directory"
@@ -134,7 +134,6 @@ if [[ "${VISUALIZE}" == true ]]; then
     # Run visualization
     python3 visualize_pose.py \
         --poses "${POSES_FILE}" \
-        --apply-mesh-alignment
 
     if [[ $? -ne 0 ]]; then
         echo ""
